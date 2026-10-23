@@ -1,0 +1,49 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 5s
+          routes:
+            - id: event-service
+              uri: ${EVENT_SERVICE_URI:lb://event-service}
+              predicates:
+                - Path=/events/**
+              filters:
+                - RewritePath=/events(?<remaining>.*), /api/events$\{remaining}
+            - id: user-service
+              uri: ${USER_SERVICE_URI:lb://user-service}
+              predicates:
+                - Path=/users/**
+              filters:
+                - RewritePath=/users(?<remaining>.*), /api/users$\{remaining}
+            - id: registration-service
+              uri: ${REGISTRATION_SERVICE_URI:lb://registration-service}
+              predicates:
+                - Path=/registrations/**
+              filters:
+                - RewritePath=/registrations(?<remaining>.*), /api/registrations$\{remaining}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      probes:
+        enabled: true
