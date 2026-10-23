@@ -19,6 +19,7 @@
     <description>Event management microservices platform</description>
 
     <modules>
+        <module>discovery-server</module>
     </modules>
 
     <properties>
