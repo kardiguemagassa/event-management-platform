@@ -10,12 +10,13 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -34,6 +35,8 @@ import org.springframework.web.client.RestClient;
 class GatewayRoutingIT {
 
     private static final List<String> receivedPaths = new CopyOnWriteArrayList<>();
+    private static final AtomicReference<String> forwardedHost = new AtomicReference<>();
+    private static final AtomicReference<String> forwardedProto = new AtomicReference<>();
     private static final HttpServer backend = startBackend();
 
     @Value("${local.server.port}")
@@ -53,31 +56,62 @@ class GatewayRoutingIT {
     }
 
     @BeforeEach
-    void resetRecordedPaths() {
+    void resetRecordedRequests() {
         receivedPaths.clear();
+        forwardedHost.set(null);
+        forwardedProto.set(null);
     }
 
     @ParameterizedTest
-    @CsvSource({
-            "/events,                     /api/events",
-            "/events/42,                  /api/events/42",
-            "/events/42/capacity/reserve, /api/events/42/capacity/reserve",
-            "/users/7,                    /api/users/7",
-            "/registrations/events/3,     /api/registrations/events/3"
+    @ValueSource(strings = {
+            "/api/events",
+            "/api/events/42",
+            "/api/events/42/capacity/reserve",
+            "/api/users",
+            "/api/users/7",
+            "/api/registrations/events/3"
     })
-    void routesAndRewritesPathToBackend(String gatewayPath, String expectedBackendPath) {
-        ResponseEntity<Void> response = get(gatewayPath);
+    void routesPathUnchangedToBackend(String path) {
+        ResponseEntity<Void> response = get(path);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(receivedPaths).containsExactly(expectedBackendPath);
+        assertThat(receivedPaths).containsExactly(path);
     }
 
     @Test
-    void unknownPathReturnsNotFoundWithoutCallingBackend(CapturedOutput output) {
-        ResponseEntity<Void> response = get("/unknown");
+    void forwardsPublicHostAndProtocolToBackend() {
+        get("/api/users/7");
+
+        assertThat(forwardedHost.get()).isEqualTo("localhost:" + port);
+        assertThat(forwardedProto.get()).isEqualTo("http");
+    }
+
+    @Test
+    void overridesSpoofedForwardedHeadersSentByClient() {
+        RestClient.create().get()
+                .uri("http://localhost:" + port + "/api/users/7")
+                .header("X-Forwarded-Host", "evil.example")
+                .header("X-Forwarded-Proto", "https")
+                .retrieve()
+                .toBodilessEntity();
+
+        assertThat(forwardedHost.get()).isEqualTo("localhost:" + port);
+        assertThat(forwardedProto.get()).isEqualTo("http");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/unknown", "/users/7", "/events"})
+    void unroutedPathReturnsNotFoundWithoutCallingBackend(String path) {
+        ResponseEntity<Void> response = get(path);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(receivedPaths).isEmpty();
+    }
+
+    @Test
+    void notFoundRequestsAreLogged(CapturedOutput output) {
+        get("/unknown");
+
         assertThat(output).contains("GET /unknown -> 404");
     }
 
@@ -102,6 +136,8 @@ class GatewayRoutingIT {
             HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
             server.createContext("/", exchange -> {
                 receivedPaths.add(exchange.getRequestURI().getRawPath());
+                forwardedHost.set(exchange.getRequestHeaders().getFirst("X-Forwarded-Host"));
+                forwardedProto.set(exchange.getRequestHeaders().getFirst("X-Forwarded-Proto"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, body.length);
