@@ -42,3 +42,13 @@ management:
     health:
       probes:
         enabled: true
+
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:true}
+    version: openapi_3_0
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:true}
+    operations-sorter: method
+  paths-to-match: /api/**
+  default-produces-media-type: application/json
