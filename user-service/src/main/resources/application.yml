@@ -1,5 +1,8 @@
 server:
   port: ${SERVER_PORT:8081}
+  # Build public URLs (Location...) from X-Forwarded-* headers set by the gateway.
+  # Safe only because services are never exposed directly: the gateway is the single entry point.
+  forward-headers-strategy: framework
 
 spring:
   application:

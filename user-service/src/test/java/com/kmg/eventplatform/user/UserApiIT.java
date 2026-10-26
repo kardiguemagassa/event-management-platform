@@ -113,6 +113,22 @@ class UserApiIT {
         }
     }
 
+    @Test
+    void locationUsesForwardedPublicHost() {
+        ResponseEntity<Map<String, Object>> created = client().post().uri("/api/users")
+                .header("X-Forwarded-Host", "api.example.com")
+                .header("X-Forwarded-Proto", "https")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("fullName", "Ada Lovelace", "email", uniqueEmail()))
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (request, response) -> { })
+                .toEntity(JSON_OBJECT);
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(created.getHeaders().getLocation().toString())
+                .startsWith("https://api.example.com/api/users/");
+    }
+
     private ResponseEntity<Map<String, Object>> create(String fullName, String email) {
         return client().post().uri("/api/users")
                 .contentType(MediaType.APPLICATION_JSON)
