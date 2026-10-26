@@ -2,10 +2,13 @@ package com.kmg.eventplatform.event.api;
 
 import com.kmg.eventplatform.event.application.EventNotFoundException;
 import com.kmg.eventplatform.event.domain.CapacityBelowReservedException;
+import com.kmg.eventplatform.event.domain.EventFullException;
 import com.kmg.eventplatform.event.domain.EventHasReservationsException;
+import com.kmg.eventplatform.event.domain.EventNotRegistrableException;
 import com.kmg.eventplatform.event.domain.EventRuleException;
 import com.kmg.eventplatform.event.domain.EventStartNotInFutureException;
 import com.kmg.eventplatform.event.domain.InvalidEventStateException;
+import com.kmg.eventplatform.event.domain.ReservationConflictException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -52,6 +55,9 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             case InvalidEventStateException e -> new HttpMapping(HttpStatus.CONFLICT, "Invalid event state");
             case CapacityBelowReservedException e -> new HttpMapping(HttpStatus.CONFLICT, "Capacity below reserved seats");
             case EventHasReservationsException e -> new HttpMapping(HttpStatus.CONFLICT, "Event has reservations");
+            case EventFullException e -> new HttpMapping(HttpStatus.CONFLICT, "Event full");
+            case EventNotRegistrableException e -> new HttpMapping(HttpStatus.CONFLICT, "Event not registrable");
+            case ReservationConflictException e -> new HttpMapping(HttpStatus.CONFLICT, "Reservation id conflict");
         };
         ProblemDetail problem = problem(mapping.status(), mapping.title(), ex.getMessage(), ex.code());
         if (ex.getEventId() != null) {

@@ -5,7 +5,8 @@ import java.util.UUID;
 /** A business rule of the event domain was violated. Carries a stable machine-readable code. */
 public abstract sealed class EventRuleException extends RuntimeException
         permits InvalidEventStateException, EventStartNotInFutureException,
-        CapacityBelowReservedException, EventHasReservationsException {
+        CapacityBelowReservedException, EventHasReservationsException,
+        EventFullException, EventNotRegistrableException, ReservationConflictException {
 
     private final UUID eventId;
 
