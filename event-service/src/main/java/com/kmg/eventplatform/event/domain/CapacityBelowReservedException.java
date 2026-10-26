@@ -2,7 +2,7 @@ package com.kmg.eventplatform.event.domain;
 
 import java.util.UUID;
 
-public class CapacityBelowReservedException extends EventRuleException {
+public final class CapacityBelowReservedException extends EventRuleException {
 
     public CapacityBelowReservedException(UUID eventId, int requestedCapacity, int reservedSeats) {
         super(eventId, "Capacity " + requestedCapacity + " is below the " + reservedSeats

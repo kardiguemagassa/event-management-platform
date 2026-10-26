@@ -3,7 +3,9 @@ package com.kmg.eventplatform.event.domain;
 import java.util.UUID;
 
 /** A business rule of the event domain was violated. Carries a stable machine-readable code. */
-public abstract class EventRuleException extends RuntimeException {
+public abstract sealed class EventRuleException extends RuntimeException
+        permits InvalidEventStateException, EventStartNotInFutureException,
+        CapacityBelowReservedException, EventHasReservationsException {
 
     private final UUID eventId;
 
