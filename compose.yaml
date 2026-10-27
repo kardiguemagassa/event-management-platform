@@ -33,6 +33,23 @@ services:
       timeout: 3s
       retries: 10
 
+  registration-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${REGISTRATION_DB_NAME:-registration_db}
+      POSTGRES_USER: ${REGISTRATION_DB_USERNAME:?REGISTRATION_DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${REGISTRATION_DB_PASSWORD:?REGISTRATION_DB_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${REGISTRATION_DB_PORT:-5435}:5432"
+    volumes:
+      - registration-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   user-db-data:
   event-db-data:
+  registration-db-data:

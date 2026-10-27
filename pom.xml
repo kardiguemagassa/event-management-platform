@@ -23,6 +23,7 @@
         <module>api-gateway</module>
         <module>user-service</module>
         <module>event-service</module>
+        <module>registration-service</module>
     </modules>
 
     <properties>
