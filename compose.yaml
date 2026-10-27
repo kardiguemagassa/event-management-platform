@@ -1,5 +1,27 @@
 name: event-platform
 
+# Common settings of the Spring Boot containers. They belong to the "app" profile, so a plain
+# "docker compose up -d" still starts the databases only (services run from the IDE), while
+# "docker compose --profile app up -d --build" starts the whole platform.
+x-spring-service: &spring-service
+  profiles: [app]
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        # The JVM sizes its heap from this limit (MaxRAMPercentage=75 in the image).
+        memory: 512M
+
+x-spring-environment: &spring-environment
+  SPRING_PROFILES_ACTIVE: docker
+  EUREKA_URL: http://discovery-server:8761/eureka
+
+x-healthcheck-timing: &healthcheck-timing
+  interval: 5s
+  timeout: 3s
+  retries: 30
+  start_period: 30s
+
 services:
   user-db:
     image: postgres:18-alpine
@@ -11,6 +33,7 @@ services:
       - "127.0.0.1:${USER_DB_PORT:-5433}:5432"
     volumes:
       - user-db-data:/var/lib/postgresql
+    networks: [user-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -27,6 +50,7 @@ services:
       - "127.0.0.1:${EVENT_DB_PORT:-5434}:5432"
     volumes:
       - event-db-data:/var/lib/postgresql
+    networks: [event-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -43,13 +67,131 @@ services:
       - "127.0.0.1:${REGISTRATION_DB_PORT:-5435}:5432"
     volumes:
       - registration-db-data:/var/lib/postgresql
+    networks: [registration-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  discovery-server:
+    <<: *spring-service
+    image: event-platform/discovery-server:dev
+    build:
+      context: .
+      args:
+        MODULE: discovery-server
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_HOSTNAME: discovery-server
+    ports:
+      - "127.0.0.1:8761:8761"
+    healthcheck:
+      <<: *healthcheck-timing
+      test: ["CMD", "curl", "-fs", "http://localhost:8761/actuator/health/readiness"]
+
+  user-service:
+    <<: *spring-service
+    image: event-platform/user-service:dev
+    networks: [default, user-net]
+    build:
+      context: .
+      args:
+        MODULE: user-service
+    # Each service receives its own database credentials only (least privilege).
+    environment:
+      <<: *spring-environment
+      USER_DB_HOST: user-db
+      USER_DB_PORT: 5432
+      USER_DB_NAME: ${USER_DB_NAME:-user_db}
+      USER_DB_USERNAME: ${USER_DB_USERNAME:?USER_DB_USERNAME is required}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?USER_DB_PASSWORD is required}
+    depends_on:
+      user-db:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-timing
+      test: ["CMD", "curl", "-fs", "http://localhost:8081/actuator/health/readiness"]
+
+  event-service:
+    <<: *spring-service
+    image: event-platform/event-service:dev
+    networks: [default, event-net]
+    build:
+      context: .
+      args:
+        MODULE: event-service
+    environment:
+      <<: *spring-environment
+      EVENT_DB_HOST: event-db
+      EVENT_DB_PORT: 5432
+      EVENT_DB_NAME: ${EVENT_DB_NAME:-event_db}
+      EVENT_DB_USERNAME: ${EVENT_DB_USERNAME:?EVENT_DB_USERNAME is required}
+      EVENT_DB_PASSWORD: ${EVENT_DB_PASSWORD:?EVENT_DB_PASSWORD is required}
+    depends_on:
+      event-db:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-timing
+      test: ["CMD", "curl", "-fs", "http://localhost:8082/actuator/health/readiness"]
+
+  registration-service:
+    <<: *spring-service
+    image: event-platform/registration-service:dev
+    networks: [default, registration-net]
+    build:
+      context: .
+      args:
+        MODULE: registration-service
+    # No dependency on user-service or event-service: their availability is handled at runtime
+    # (Eureka, retry, circuit breaker), not at startup.
+    environment:
+      <<: *spring-environment
+      REGISTRATION_DB_HOST: registration-db
+      REGISTRATION_DB_PORT: 5432
+      REGISTRATION_DB_NAME: ${REGISTRATION_DB_NAME:-registration_db}
+      REGISTRATION_DB_USERNAME: ${REGISTRATION_DB_USERNAME:?REGISTRATION_DB_USERNAME is required}
+      REGISTRATION_DB_PASSWORD: ${REGISTRATION_DB_PASSWORD:?REGISTRATION_DB_PASSWORD is required}
+    depends_on:
+      registration-db:
+        condition: service_healthy
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-timing
+      test: ["CMD", "curl", "-fs", "http://localhost:8083/actuator/health/readiness"]
+
+  api-gateway:
+    <<: *spring-service
+    image: event-platform/api-gateway:dev
+    build:
+      context: .
+      args:
+        MODULE: api-gateway
+    environment:
+      <<: *spring-environment
+    # Single public entry point; the services themselves publish no port.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-timing
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health/readiness"]
+
 volumes:
   user-db-data:
   event-db-data:
   registration-db-data:
+
+networks:
+  # One private network per service and its database: a database is reachable by its owner only.
+  # Spring services also join "default" to reach Eureka, the gateway and each other.
+  user-net:
+  event-net:
+  registration-net:

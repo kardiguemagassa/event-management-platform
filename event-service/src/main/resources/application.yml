@@ -5,6 +5,10 @@ server:
   forward-headers-strategy: framework
 
 spring:
+  threads:
+    virtual:
+      # Blocking calls (JDBC, RestClient) park a cheap virtual thread instead of holding a platform thread.
+      enabled: true
   application:
     name: event-service
   config:
