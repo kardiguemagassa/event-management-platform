@@ -10,7 +10,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -81,6 +83,41 @@ class RegistrationServiceTest {
 
         assertThat(events.releaseCalls).isZero();
         verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void duplicateIsRejectedBeforeAnySideEffect() {
+        when(repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> service.register(eventId, userId))
+                .isInstanceOf(DuplicateRegistrationException.class);
+
+        assertThat(events.heldSeats).isEmpty();
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void concurrentDuplicateLosingTheRaceReleasesItsSeat() {
+        when(repository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("could not execute",
+                new SQLException("duplicate key value violates unique constraint \""
+                        + RegistrationService.ACTIVE_REGISTRATION_INDEX + "\"")));
+
+        assertThatThrownBy(() -> service.register(eventId, userId))
+                .isInstanceOf(DuplicateRegistrationException.class);
+
+        assertThat(events.heldSeats).isEmpty();
+    }
+
+    @Test
+    void otherIntegrityViolationsAreNotMistakenForDuplicates() {
+        when(repository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("could not execute",
+                new SQLException("new row violates check constraint \"ck_registrations_status\"")));
+
+        assertThatThrownBy(() -> service.register(eventId, userId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(events.heldSeats).isEmpty();
     }
 
     @Test

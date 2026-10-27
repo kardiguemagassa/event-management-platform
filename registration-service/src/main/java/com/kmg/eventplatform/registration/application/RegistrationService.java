@@ -3,8 +3,11 @@ package com.kmg.eventplatform.registration.application;
 import com.kmg.eventplatform.registration.domain.Registration;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
 import com.kmg.eventplatform.registration.domain.RegistrationRepository;
+import com.kmg.eventplatform.registration.domain.RegistrationStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -22,6 +25,9 @@ import java.util.UUID;
 public class RegistrationService {
 
     private static final Logger log = LoggerFactory.getLogger(RegistrationService.class);
+
+    /** Partial unique index of migration V2. */
+    static final String ACTIVE_REGISTRATION_INDEX = "uq_registrations_active_event_user";
 
     private final RegistrationRepository repository;
     private final UserDirectory users;
@@ -43,6 +49,11 @@ public class RegistrationService {
         if (!events.exists(eventId)) {
             throw new EventNotFoundException(eventId);
         }
+        // Fast path with a clear error and no remote side effect. Not a guarantee under concurrency:
+        // the unique index is, and is translated below.
+        if (repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED)) {
+            throw new DuplicateRegistrationException(eventId, userId);
+        }
 
         // Generated before any side effect: it is the idempotency key of the seat reservation.
         UUID registrationId = UUID.randomUUID();
@@ -51,6 +62,9 @@ public class RegistrationService {
             return repository.saveAndFlush(Registration.confirm(registrationId, eventId, userId, clock.instant()));
         } catch (RuntimeException saveFailure) {
             releaseSeatQuietly(eventId, registrationId, saveFailure);
+            if (isActiveRegistrationConflict(saveFailure)) {
+                throw new DuplicateRegistrationException(eventId, userId);
+            }
             throw saveFailure;
         }
     }
@@ -92,6 +106,14 @@ public class RegistrationService {
             releaseSeatQuietly(eventId, registrationId, unknownOutcome);
             throw unknownOutcome;
         }
+    }
+
+    private static boolean isActiveRegistrationConflict(RuntimeException failure) {
+        if (!(failure instanceof DataIntegrityViolationException)) {
+            return false;
+        }
+        String message = NestedExceptionUtils.getMostSpecificCause(failure).getMessage();
+        return message != null && message.contains(ACTIVE_REGISTRATION_INDEX);
     }
 
     /**

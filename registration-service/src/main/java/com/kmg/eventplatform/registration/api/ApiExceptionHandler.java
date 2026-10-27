@@ -1,6 +1,7 @@
 package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
+import com.kmg.eventplatform.registration.application.DuplicateRegistrationException;
 import com.kmg.eventplatform.registration.application.EventFullException;
 import com.kmg.eventplatform.registration.application.EventNotFoundException;
 import com.kmg.eventplatform.registration.application.EventNotRegistrableException;
@@ -45,6 +46,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             case RegistrationNotFoundException notFound -> HttpStatus.NOT_FOUND;
             case EventFullException conflict -> HttpStatus.CONFLICT;
             case EventNotRegistrableException conflict -> HttpStatus.CONFLICT;
+            case DuplicateRegistrationException conflict -> HttpStatus.CONFLICT;
             case DownstreamUnavailableException unavailable -> HttpStatus.SERVICE_UNAVAILABLE;
         };
         if (failure instanceof DownstreamUnavailableException) {

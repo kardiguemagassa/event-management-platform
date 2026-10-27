@@ -6,7 +6,8 @@ package com.kmg.eventplatform.registration.application;
  */
 public sealed abstract class RegistrationFailureException extends RuntimeException
         permits EventNotFoundException, EventFullException, EventNotRegistrableException,
-        DownstreamUnavailableException, UserNotFoundException, RegistrationNotFoundException {
+        DownstreamUnavailableException, UserNotFoundException, RegistrationNotFoundException,
+        DuplicateRegistrationException {
 
     private final String code;
 

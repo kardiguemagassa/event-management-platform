@@ -71,6 +71,28 @@ class RegistrationRepositoryTest {
     }
 
     @Test
+    void databaseRejectsSecondActiveRegistration() {
+        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, userId, NOW));
+
+        assertThatThrownBy(() -> repository.saveAndFlush(
+                Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(1))))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_registrations_active_event_user");
+    }
+
+    @Test
+    void userCanRegisterAgainAfterCancelling() {
+        Registration first = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        repository.saveAndFlush(first);
+        first.cancel(NOW.plusSeconds(60));
+        repository.saveAndFlush(first);
+
+        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(120)));
+
+        assertThat(repository.findByEventId(eventId, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
     void databaseRejectsCancelledRowWithoutCancellationDate() {
         assertThatThrownBy(() -> jdbcTemplate.update(
                 "INSERT INTO registrations (id, event_id, user_id, status, created_at) VALUES (?, ?, ?, 'CANCELLED', now())",
