@@ -1,0 +1,7 @@
+# Active in containers (SPRING_PROFILES_ACTIVE=docker).
+# Dev only: evict dead instances within seconds and keep the registry cache fresh. Production keeps the defaults.
+eureka:
+  server:
+    enable-self-preservation: false
+    eviction-interval-timer-in-ms: 5000
+    response-cache-update-interval-ms: 3000

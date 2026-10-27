@@ -1,0 +1,16 @@
+# Active in containers (SPRING_PROFILES_ACTIVE=docker). Hosts and secrets come from environment variables.
+# Short intervals: a stopped or new instance is seen in seconds instead of ~90 s. Production keeps the defaults.
+eureka:
+  instance:
+    # Unique per container: replicas never overwrite (and unregister) each other.
+    instance-id: ${spring.application.name}:${random.value}
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 15
+  client:
+    registry-fetch-interval-seconds: 5
+
+spring:
+  cloud:
+    loadbalancer:
+      cache:
+        ttl: 5s
