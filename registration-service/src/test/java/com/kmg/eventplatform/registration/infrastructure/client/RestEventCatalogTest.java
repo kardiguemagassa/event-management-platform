@@ -14,12 +14,14 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
+import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -141,6 +143,26 @@ class RestEventCatalogTest {
                 .andRespond(withSuccess("{\"outcome\":\"NOT_RESERVED\"}", MediaType.APPLICATION_JSON));
 
         assertThatNoException().isThrownBy(() -> catalog.releaseSeat(eventId, reservationId));
+    }
+
+    @Test
+    void onlyFastFailuresAreMarkedTransient() {
+        server.expect(requestTo(eventUrl)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        server.expect(requestTo(eventUrl)).andRespond(withException(new ConnectException("Connection refused")));
+        server.expect(requestTo(eventUrl)).andRespond(withServerError());
+        server.expect(requestTo(eventUrl)).andRespond(withException(new SocketTimeoutException("read timed out")));
+
+        assertThat(catchThrowable(() -> catalog.exists(eventId)))
+                .isInstanceOf(DownstreamUnavailableException.class)
+                .hasCauseInstanceOf(TransientDownstreamException.class);
+        assertThat(catchThrowable(() -> catalog.exists(eventId)))
+                .isInstanceOf(DownstreamUnavailableException.class)
+                .hasCauseInstanceOf(TransientDownstreamException.class);
+        assertThat(catchThrowable(() -> catalog.exists(eventId)))
+                .isInstanceOf(DownstreamUnavailableException.class)
+                .hasNoCause();
+        assertThat(catchThrowable(() -> catalog.exists(eventId)).getCause())
+                .isNotInstanceOf(TransientDownstreamException.class);
     }
 
     private static ResponseCreator problem(HttpStatus status, String code) {

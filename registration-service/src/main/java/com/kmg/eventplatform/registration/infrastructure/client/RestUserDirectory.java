@@ -9,7 +9,7 @@ import java.util.UUID;
 
 class RestUserDirectory implements UserDirectory {
 
-    private static final String SERVICE = "user-service";
+    static final String SERVICE = "user-service";
 
     private final RestClient client;
 

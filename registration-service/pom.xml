@@ -57,6 +57,10 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
         <!-- Production-grade cache for Spring Cloud LoadBalancer (this service calls other services) -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>

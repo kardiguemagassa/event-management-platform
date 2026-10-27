@@ -7,6 +7,8 @@ import org.springframework.web.client.RestClient.RequestHeadersSpec.ConvertibleC
 import org.springframework.web.client.RestClientException;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -14,19 +16,22 @@ import java.util.function.Supplier;
  */
 final class DownstreamResponses {
 
+    private static final Set<Integer> TRANSIENT_STATUSES = Set.of(502, 503, 504);
+
     private DownstreamResponses() {
     }
 
     /**
-     * Every way a call can fail without an HTTP answer becomes a retryable {@link DownstreamUnavailableException}:
+     * Every way a call can fail without an HTTP answer becomes a {@link DownstreamUnavailableException}:
      * I/O errors and timeouts (RestClientException), and Spring Cloud LoadBalancer finding no instance at all
-     * (IllegalStateException "No instances available for ...").
+     * (IllegalStateException "No instances available for ..."). Fast, retryable failures are marked transient.
      */
     static <T> T call(String service, Supplier<T> call) {
         try {
             return call.get();
         } catch (RestClientException | IllegalStateException noAnswer) {
-            throw new DownstreamUnavailableException(service, noAnswer);
+            Throwable cause = isTransient(noAnswer) ? new TransientDownstreamException(noAnswer) : noAnswer;
+            throw new DownstreamUnavailableException(service, cause);
         }
     }
 
@@ -36,13 +41,30 @@ final class DownstreamResponses {
     }
 
     /**
-     * 5xx means the downstream is failing: retryable. Anything else breaks the contract: a bug, not an outage.
+     * 5xx means the downstream is failing: unavailable, and transient for 502/503/504.
+     * Anything else breaks the contract: a bug, not an outage.
      */
     static RuntimeException unexpected(String service, HttpStatusCode status) {
         if (status.is5xxServerError()) {
-            return new DownstreamUnavailableException(service, "responded " + status.value());
+            String detail = "responded " + status.value();
+            return TRANSIENT_STATUSES.contains(status.value())
+                    ? new DownstreamUnavailableException(service, new TransientDownstreamException(detail))
+                    : new DownstreamUnavailableException(service, detail);
         }
         return new DownstreamContractException(service + " responded with unexpected status " + status.value());
+    }
+
+    /** No registered instance, or connection refused: nothing was processed and another try is cheap. */
+    private static boolean isTransient(Throwable failure) {
+        if (failure instanceof IllegalStateException) {
+            return true;
+        }
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConnectException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

@@ -5,6 +5,11 @@ spring:
   application:
     name: api-gateway
   cloud:
+    circuitbreaker:
+      resilience4j:
+        # The default 1 s TimeLimiter would cut slow but legitimate calls:
+        # the httpclient response-timeout stays the single timeout.
+        disable-time-limiter: true
     gateway:
       server:
         webflux:
@@ -18,14 +23,47 @@ spring:
               uri: ${EVENT_SERVICE_URI:lb://event-service}
               predicates:
                 - Path=/api/events/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: event-service
+                    fallbackUri: forward:/fallback/unavailable
+                - name: Retry
+                  args:
+                    retries: 1
+                    methods: GET
+                    series: ""
+                    exceptions: java.io.IOException
             - id: user-service
               uri: ${USER_SERVICE_URI:lb://user-service}
               predicates:
                 - Path=/api/users/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: user-service
+                    fallbackUri: forward:/fallback/unavailable
+                - name: Retry
+                  args:
+                    retries: 1
+                    methods: GET
+                    series: ""
+                    exceptions: java.io.IOException
             - id: registration-service
               uri: ${REGISTRATION_SERVICE_URI:lb://registration-service}
               predicates:
                 - Path=/api/registrations/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: registration-service
+                    fallbackUri: forward:/fallback/unavailable
+                - name: Retry
+                  args:
+                    retries: 1
+                    methods: GET
+                    series: ""
+                    exceptions: java.io.IOException
 
 eureka:
   client:
@@ -43,3 +81,12 @@ management:
     health:
       probes:
         enabled: true
+
+gateway:
+  # One breaker per route, all sharing these settings; every routing error counts as a failure.
+  circuit-breaker:
+    sliding-window-size: 20
+    minimum-number-of-calls: 10
+    failure-rate-threshold: 50
+    wait-duration-in-open-state: 10s
+    permitted-number-of-calls-in-half-open-state: 3
