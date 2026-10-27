@@ -23,6 +23,16 @@ spring:
     web:
       pageable:
         max-page-size: 100
+  cloud:
+    circuitbreaker:
+      resilience4j:
+        # Run on the caller thread: no executor hop (exceptions, tracing and logging context stay intact)
+        # and no TimeLimiter, so the HTTP client read timeout is the single timeout.
+        disable-thread-pool: true
+      bulkhead:
+        resilience4j:
+          # No thread hop per call (keeps the tracing and logging context).
+          enabled: false
 
 eureka:
   client:
@@ -58,4 +68,14 @@ registration:
     user-service-url: ${USER_SERVICE_URL:http://user-service}
     event-service-url: ${EVENT_SERVICE_URL:http://event-service}
     connect-timeout: ${DOWNSTREAM_CONNECT_TIMEOUT:1s}
-    read-timeout: ${DOWNSTREAM_READ_TIMEOUT:2s}
+    read-timeout: ${DOWNSTREAM_READ_TIMEOUT:1500ms}
+    retry:
+      max-retries: 1
+      delay: 100ms
+      jitter: 50ms
+    circuit-breaker:
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 10s
+      permitted-number-of-calls-in-half-open-state: 3

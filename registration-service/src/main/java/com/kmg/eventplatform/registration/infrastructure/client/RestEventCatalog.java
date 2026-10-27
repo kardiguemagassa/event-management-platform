@@ -13,7 +13,7 @@ import java.util.UUID;
 
 class RestEventCatalog implements EventCatalog {
 
-    private static final String SERVICE = "event-service";
+    static final String SERVICE = "event-service";
 
     private final RestClient client;
 
