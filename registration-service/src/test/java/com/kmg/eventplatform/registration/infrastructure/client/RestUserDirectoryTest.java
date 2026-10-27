@@ -74,9 +74,18 @@ class RestUserDirectoryTest {
     }
 
     @Test
+    void noRegisteredInstanceMeansUnavailable() {
+        server.expect(requestTo(userUrl)).andRespond(request -> {
+            throw new IllegalStateException("No instances available for user-service");
+        });
+
+        assertThatThrownBy(() -> directory.exists(userId)).isInstanceOf(DownstreamUnavailableException.class);
+    }
+
+    @Test
     void unexpectedClientErrorIsAContractViolation() {
         server.expect(requestTo(userUrl)).andRespond(withStatus(HttpStatus.BAD_REQUEST));
 
-        assertThatThrownBy(() -> directory.exists(userId)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> directory.exists(userId)).isInstanceOf(DownstreamContractException.class);
     }
 }

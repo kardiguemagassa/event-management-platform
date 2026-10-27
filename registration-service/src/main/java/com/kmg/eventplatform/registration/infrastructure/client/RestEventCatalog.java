@@ -1,6 +1,5 @@
 package com.kmg.eventplatform.registration.infrastructure.client;
 
-import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventCatalog;
 import com.kmg.eventplatform.registration.application.EventFullException;
 import com.kmg.eventplatform.registration.application.EventNotFoundException;
@@ -9,7 +8,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import java.util.UUID;
 
@@ -25,23 +23,19 @@ class RestEventCatalog implements EventCatalog {
 
     @Override
     public boolean exists(UUID eventId) {
-        try {
-            Boolean found = client.get()
-                    .uri("/api/events/{id}", eventId)
-                    .exchange((request, response) -> {
-                        HttpStatusCode status = response.getStatusCode();
-                        if (status.is2xxSuccessful()) {
-                            return true;
-                        }
-                        if (status.isSameCodeAs(HttpStatus.NOT_FOUND)) {
-                            return false;
-                        }
-                        throw DownstreamResponses.unexpected(SERVICE, status);
-                    });
-            return Boolean.TRUE.equals(found);
-        } catch (RestClientException e) {
-            throw new DownstreamUnavailableException(SERVICE, e);
-        }
+        Boolean found = DownstreamResponses.call(SERVICE, () -> client.get()
+                .uri("/api/events/{id}", eventId)
+                .exchange((request, response) -> {
+                    HttpStatusCode status = response.getStatusCode();
+                    if (status.is2xxSuccessful()) {
+                        return true;
+                    }
+                    if (status.isSameCodeAs(HttpStatus.NOT_FOUND)) {
+                        return false;
+                    }
+                    throw DownstreamResponses.unexpected(SERVICE, status);
+                }));
+        return Boolean.TRUE.equals(found);
     }
 
     @Override
@@ -55,24 +49,20 @@ class RestEventCatalog implements EventCatalog {
     }
 
     private void postCapacity(String path, UUID eventId, UUID reservationId) {
-        try {
-            client.post()
-                    .uri(path, eventId)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(new CapacityRequest(reservationId))
-                    .exchange((request, response) -> {
-                        HttpStatusCode status = response.getStatusCode();
-                        if (status.is2xxSuccessful()) {
-                            return null;
-                        }
-                        if (status.is4xxClientError()) {
-                            throw rejection(eventId, status, DownstreamResponses.problemCode(response));
-                        }
-                        throw DownstreamResponses.unexpected(SERVICE, status);
-                    });
-        } catch (RestClientException e) {
-            throw new DownstreamUnavailableException(SERVICE, e);
-        }
+        DownstreamResponses.call(SERVICE, () -> client.post()
+                .uri(path, eventId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new CapacityRequest(reservationId))
+                .exchange((request, response) -> {
+                    HttpStatusCode status = response.getStatusCode();
+                    if (status.is2xxSuccessful()) {
+                        return null;
+                    }
+                    if (status.is4xxClientError()) {
+                        throw rejection(eventId, status, DownstreamResponses.problemCode(response));
+                    }
+                    throw DownstreamResponses.unexpected(SERVICE, status);
+                }));
     }
 
     /**

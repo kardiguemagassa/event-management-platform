@@ -117,11 +117,21 @@ class RestEventCatalogTest {
     }
 
     @Test
+    void reserveWithoutRegisteredInstanceIsUnavailable() {
+        server.expect(requestTo(reserveUrl)).andRespond(request -> {
+            throw new IllegalStateException("No instances available for event-service");
+        });
+
+        assertThatThrownBy(() -> catalog.reserveSeat(eventId, reservationId))
+                .isInstanceOf(DownstreamUnavailableException.class);
+    }
+
+    @Test
     void reserveTreatsUnknownRejectionAsContractViolation() {
         server.expect(requestTo(reserveUrl)).andRespond(problem(HttpStatus.CONFLICT, "RESERVATION_CONFLICT"));
 
         assertThatThrownBy(() -> catalog.reserveSeat(eventId, reservationId))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(DownstreamContractException.class);
     }
 
     @Test
