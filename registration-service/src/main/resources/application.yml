@@ -1,0 +1,89 @@
+server:
+  port: ${SERVER_PORT:8083}
+  # Build public URLs (Location...) from X-Forwarded-* headers set by the gateway.
+  # Safe only because services are never exposed directly: the gateway is the single entry point.
+  forward-headers-strategy: framework
+
+spring:
+  threads:
+    virtual:
+      # Blocking calls (JDBC, RestClient) park a cheap virtual thread instead of holding a platform thread.
+      enabled: true
+  application:
+    name: registration-service
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+  datasource:
+    url: jdbc:postgresql://${REGISTRATION_DB_HOST:localhost}:${REGISTRATION_DB_PORT:5435}/${REGISTRATION_DB_NAME:registration_db}
+    username: ${REGISTRATION_DB_USERNAME}
+    password: ${REGISTRATION_DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+  cloud:
+    circuitbreaker:
+      resilience4j:
+        # Run on the caller thread: no executor hop (exceptions, tracing and logging context stay intact)
+        # and no TimeLimiter, so the HTTP client read timeout is the single timeout.
+        disable-thread-pool: true
+      bulkhead:
+        resilience4j:
+          # No thread hop per call (keeps the tracing and logging context).
+          enabled: false
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    healthcheck:
+      enabled: true
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # circuitbreakers / circuitbreakerevents: state and transition history of the downstream circuits.
+        # Internal only: services publish no port (Docker) and the gateway routes no /actuator path.
+        include: health, info, circuitbreakers, circuitbreakerevents
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:true}
+    version: openapi_3_0
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:true}
+    operations-sorter: method
+  paths-to-match: /api/**
+  default-produces-media-type: application/json
+
+registration:
+  clients:
+    user-service-url: ${USER_SERVICE_URL:http://user-service}
+    event-service-url: ${EVENT_SERVICE_URL:http://event-service}
+    connect-timeout: ${DOWNSTREAM_CONNECT_TIMEOUT:1s}
+    read-timeout: ${DOWNSTREAM_READ_TIMEOUT:1500ms}
+    retry:
+      max-retries: 1
+      delay: 100ms
+      jitter: 50ms
+    circuit-breaker:
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 10s
+      permitted-number-of-calls-in-half-open-state: 3
+      # A half-open circuit that cannot conclude goes back to open after this delay, instead of waiting forever.
+      max-wait-duration-in-half-open-state: 10s

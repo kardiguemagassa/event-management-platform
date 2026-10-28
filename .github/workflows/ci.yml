@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+
+# Least privilege: the jobs only read the repository.
+permissions:
+  contents: read
+
+# A new push cancels the run still in progress for the same pull request or branch.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # Unit tests, then integration tests against real PostgreSQL containers (Testcontainers).
+      - name: Verify
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+          retention-days: 7
+
+  e2e:
+    name: e2e
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Throwaway database passwords for this run only: nothing is stored as a secret, nothing is logged.
+      - name: Create .env
+        run: |
+          cp .env.example .env
+          for service in USER EVENT REGISTRATION; do
+            password=$(openssl rand -hex 16)
+            echo "::add-mask::$password"
+            sed -i "s|^${service}_DB_PASSWORD=.*|${service}_DB_PASSWORD=${password}|" .env
+          done
+      - name: Start the platform
+        run: docker compose --profile app up -d --build --wait --wait-timeout 300
+      - name: End-to-end scenario
+        run: ./scripts/e2e-docker.sh
+      - name: Container logs
+        if: failure()
+        run: docker compose --profile app logs --no-color --tail=200
+      - name: Stop the platform
+        if: always()
+        run: docker compose --profile app down -v
