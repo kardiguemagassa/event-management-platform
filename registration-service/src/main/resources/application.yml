@@ -85,3 +85,5 @@ registration:
       failure-rate-threshold: 50
       wait-duration-in-open-state: 10s
       permitted-number-of-calls-in-half-open-state: 3
+      # A half-open circuit that cannot conclude goes back to open after this delay, instead of waiting forever.
+      max-wait-duration-in-half-open-state: 10s

@@ -37,6 +37,7 @@ public record DownstreamClientsProperties(
             @Positive int minimumNumberOfCalls,
             @Positive @DecimalMax("100") float failureRateThreshold,
             @NotNull Duration waitDurationInOpenState,
-            @Positive int permittedNumberOfCallsInHalfOpenState) {
+            @Positive int permittedNumberOfCallsInHalfOpenState,
+            @NotNull Duration maxWaitDurationInHalfOpenState) {
     }
 }
