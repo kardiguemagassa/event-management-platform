@@ -9,6 +9,7 @@ import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
@@ -20,6 +21,7 @@ final class FakeBackend {
     private final HttpServer server;
     private final Queue<Duration> delays = new ConcurrentLinkedQueue<>();
     private final AtomicInteger requests = new AtomicInteger();
+    private final Queue<String> paths = new ConcurrentLinkedQueue<>();
 
     private FakeBackend(HttpServer server) {
         this.server = server;
@@ -50,13 +52,20 @@ final class FakeBackend {
         return requests.get();
     }
 
+    /** Paths received since the last reset, in arrival order. */
+    List<String> paths() {
+        return List.copyOf(paths);
+    }
+
     void reset() {
         delays.clear();
         requests.set(0);
+        paths.clear();
     }
 
     private void handle(HttpExchange exchange) throws IOException {
         requests.incrementAndGet();
+        paths.add(exchange.getRequestURI().getPath());
         Duration delay = delays.poll();
         if (delay != null) {
             try {
