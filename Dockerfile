@@ -35,8 +35,10 @@ RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw --batch-mode --quiet --projects "${MODULE}" --also-make dependency:go-offline
 
 COPY ${MODULE}/src ${MODULE}/src
+# Declared after the dependency download: a new version does not invalidate that cached layer.
+ARG REVISION=0.0.0-SNAPSHOT
 RUN --mount=type=cache,target=/root/.m2 \
-    ./mvnw --batch-mode --quiet --projects "${MODULE}" --also-make package -DskipTests \
+    ./mvnw --batch-mode --quiet --projects "${MODULE}" --also-make package -DskipTests -Drevision="${REVISION}" \
     && java -Djarmode=tools -jar "${MODULE}"/target/"${MODULE}"-*.jar \
         extract --layers --launcher --destination /workspace/extracted
 
