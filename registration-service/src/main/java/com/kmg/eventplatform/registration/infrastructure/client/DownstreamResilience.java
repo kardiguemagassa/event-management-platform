@@ -13,6 +13,8 @@ import java.util.function.Supplier;
  *     <li>Only failures marked {@link TransientDownstreamException} are retried.</li>
  *     <li>Only {@link DownstreamUnavailableException} is recorded by the breaker: business rejections
  *     (404, 409) are answers, not outages.</li>
+ *     <li>A missing instance ({@link NoInstanceAvailableException}) is ignored by the breaker: no request was
+ *     sent, and right after a restart it would fail the half-open probes while discovery catches up.</li>
  *     <li>An open circuit fails fast with {@link DownstreamUnavailableException}, without any network call.</li>
  * </ul>
  */

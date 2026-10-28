@@ -53,26 +53,33 @@ class DownstreamClientsConfig {
         return configurer.configure(RestClient.builder()).requestFactory(requestFactory);
     }
 
-    /**
-     * Breaker settings from our own validated properties, through the Spring Cloud API:
-     * only {@link DownstreamUnavailableException} counts as a failure.
-     */
+    /** Breaker settings from our own validated properties, through the Spring Cloud API. */
     @Bean
     Customizer<Resilience4JCircuitBreakerFactory> downstreamCircuitBreakers(DownstreamClientsProperties properties) {
-        DownstreamClientsProperties.CircuitBreaker settings = properties.circuitBreaker();
-        CircuitBreakerConfig config = CircuitBreakerConfig.custom()
+        CircuitBreakerConfig config = circuitBreakerConfig(properties.circuitBreaker());
+        return factory -> factory.configureDefault(id -> new Resilience4JConfigBuilder(id)
+                .circuitBreakerConfig(config)
+                .build());
+    }
+
+    /**
+     * Only {@link DownstreamUnavailableException} counts as a failure, except a missing instance
+     * ({@link NoInstanceAvailableException}): ignored, it neither opens the circuit nor uses a half-open probe.
+     * A half-open circuit that cannot conclude goes back to open after maxWaitDurationInHalfOpenState.
+     */
+    static CircuitBreakerConfig circuitBreakerConfig(DownstreamClientsProperties.CircuitBreaker settings) {
+        return CircuitBreakerConfig.custom()
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .slidingWindowSize(settings.slidingWindowSize())
                 .minimumNumberOfCalls(settings.minimumNumberOfCalls())
                 .failureRateThreshold(settings.failureRateThreshold())
                 .waitDurationInOpenState(settings.waitDurationInOpenState())
                 .permittedNumberOfCallsInHalfOpenState(settings.permittedNumberOfCallsInHalfOpenState())
+                .maxWaitDurationInHalfOpenState(settings.maxWaitDurationInHalfOpenState())
                 .automaticTransitionFromOpenToHalfOpenEnabled(true)
                 .recordExceptions(DownstreamUnavailableException.class)
+                .ignoreException(NoInstanceAvailableException::isCauseOf)
                 .build();
-        return factory -> factory.configureDefault(id -> new Resilience4JConfigBuilder(id)
-                .circuitBreakerConfig(config)
-                .build());
     }
 
     @Bean

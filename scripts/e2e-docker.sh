@@ -26,11 +26,22 @@ check() { # LABEL EXPECTED_STATUS [EXPECTED_CODE]
 }
 register() { call POST /api/registrations "{\"eventId\":\"$E\",\"userId\":\"$1\"}"; }
 
+# Healthy containers are not routable yet: the gateway must first see each service in Eureka.
+echo "== Waiting for the gateway to route every service"
+for route in /api/users /api/events /api/registrations/users/00000000-0000-0000-0000-000000000000; do
+  for i in $(seq 1 60); do call GET "$route"; [ "$CODE" = 200 ] && break; sleep 2; done
+  [ "$CODE" = 200 ] || { echo "FAIL  the gateway does not route $route"; exit 1; }
+done
+
 echo "== Setup"
 for u in 1 2 3 4; do
   call POST /api/users "{\"fullName\":\"Docker User $u\",\"email\":\"docker.$u.$TS@example.com\"}"
   check "create user $u" 201; eval "U$u=$(field id)"
 done
+# registration-service needs its own view of both dependencies: an unknown event (404) proves it reaches them.
+E=00000000-0000-0000-0000-000000000000
+for i in $(seq 1 30); do register "$U1"; [ "$CODE" = 404 ] && break; sleep 2; done
+check "registration-service reaches user-service and event-service" 404
 call POST /api/events '{"title":"Docker Day","location":"Paris","startAt":"2027-03-15T18:00:00Z","capacity":2}'
 check "create event (capacity 2)" 201; E=$(field id)
 call POST "/api/events/$E/publish"; echo "      publish -> $CODE"

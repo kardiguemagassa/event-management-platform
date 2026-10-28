@@ -24,14 +24,14 @@ final class DownstreamResponses {
     /**
      * Every way a call can fail without an HTTP answer becomes a {@link DownstreamUnavailableException}:
      * I/O errors and timeouts (RestClientException), and Spring Cloud LoadBalancer finding no instance at all
-     * (IllegalStateException "No instances available for ..."). Fast, retryable failures are marked transient.
+     * (IllegalStateException "No instances available for ...").
+     * Fast, retryable failures are marked transient, a missing instance as {@link NoInstanceAvailableException}.
      */
     static <T> T call(String service, Supplier<T> call) {
         try {
             return call.get();
         } catch (RestClientException | IllegalStateException noAnswer) {
-            Throwable cause = isTransient(noAnswer) ? new TransientDownstreamException(noAnswer) : noAnswer;
-            throw new DownstreamUnavailableException(service, cause);
+            throw new DownstreamUnavailableException(service, classify(noAnswer));
         }
     }
 
@@ -54,17 +54,20 @@ final class DownstreamResponses {
         return new DownstreamContractException(service + " responded with unexpected status " + status.value());
     }
 
-    /** No registered instance, or connection refused: nothing was processed and another try is cheap. */
-    private static boolean isTransient(Throwable failure) {
-        if (failure instanceof IllegalStateException) {
-            return true;
+    /**
+     * No registered instance, or connection refused: nothing was processed and another try is cheap.
+     * Anything else (a timeout, for instance) is kept as is: not transient.
+     */
+    private static Throwable classify(RuntimeException noAnswer) {
+        if (noAnswer instanceof IllegalStateException) {
+            return new NoInstanceAvailableException(noAnswer);
         }
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+        for (Throwable cause = noAnswer; cause != null; cause = cause.getCause()) {
             if (cause instanceof ConnectException) {
-                return true;
+                return new TransientDownstreamException(noAnswer);
             }
         }
-        return false;
+        return noAnswer;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
