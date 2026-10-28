@@ -67,8 +67,13 @@ START=$(date +%s)
 for i in $(seq 1 30); do register "$U4"; [ "$CODE" = 201 ] && break; sleep 2; done
 check "register user 4 after recovery ($(( $(date +%s) - START ))s after healthy)" 201
 
+# The gateway discovers the restarted instance on its own schedule (Eureka fetch and load balancer cache).
+START=$(date +%s)
+for i in $(seq 1 30); do call GET "/api/events/$E"; [ "$CODE" = 200 ] && break; sleep 1; done
+check "gateway routes event-service again ($(( $(date +%s) - START ))s)" 200
+
 echo "== No seat leaked"
-call GET "/api/events/$E"; SEATS=$(field availableSeats)
+SEATS=$(field availableSeats)
 [ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, users 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
 
