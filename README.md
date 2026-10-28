@@ -57,6 +57,18 @@ recovery after restart, and no seat leaked.
 - One private network per service and its database: a database is reachable by its owner only.
 - Health checks on `/actuator/health/readiness`, used to order the startup.
 
+### Running a published release
+
+Every merge to `main` and every `vX.Y.Z` tag publishes images for `linux/amd64` and `linux/arm64` to Docker Hub as
+`kardigue/event-platform-<service>`, tagged `X.Y.Z`, `X.Y` and `latest` (releases only), `main` and `sha-<commit>`.
+Each image is scanned with Trivy (no fixable critical vulnerability) and carries an SBOM and build provenance.
+
+```bash
+export IMAGE_NAMESPACE=kardigue IMAGE_TAG=0.1.0
+docker compose --profile app pull
+docker compose --profile app up -d --no-build
+```
+
 ### Stopping
 
 ```bash
