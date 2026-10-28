@@ -3,6 +3,9 @@ name: event-platform
 # Common settings of the Spring Boot containers. They belong to the "app" profile, so a plain
 # "docker compose up -d" still starts the databases only (services run from the IDE), while
 # "docker compose --profile app up -d --build" starts the whole platform.
+# Images are ${IMAGE_NAMESPACE:-local}/event-platform-<service>:${IMAGE_TAG:-dev}. To run a published release:
+#   IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0.0 docker compose --profile app pull
+#   IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0.0 docker compose --profile app up -d --no-build
 x-spring-service: &spring-service
   profiles: [app]
   restart: unless-stopped
@@ -76,7 +79,7 @@ services:
 
   discovery-server:
     <<: *spring-service
-    image: event-platform/discovery-server:dev
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-discovery-server:${IMAGE_TAG:-dev}
     build:
       context: .
       args:
@@ -92,7 +95,7 @@ services:
 
   user-service:
     <<: *spring-service
-    image: event-platform/user-service:dev
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-user-service:${IMAGE_TAG:-dev}
     networks: [default, user-net]
     build:
       context: .
@@ -117,7 +120,7 @@ services:
 
   event-service:
     <<: *spring-service
-    image: event-platform/event-service:dev
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-event-service:${IMAGE_TAG:-dev}
     networks: [default, event-net]
     build:
       context: .
@@ -141,7 +144,7 @@ services:
 
   registration-service:
     <<: *spring-service
-    image: event-platform/registration-service:dev
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-registration-service:${IMAGE_TAG:-dev}
     networks: [default, registration-net]
     build:
       context: .
@@ -167,7 +170,7 @@ services:
 
   api-gateway:
     <<: *spring-service
-    image: event-platform/api-gateway:dev
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-api-gateway:${IMAGE_TAG:-dev}
     build:
       context: .
       args:
