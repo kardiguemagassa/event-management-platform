@@ -10,6 +10,11 @@
         <version>${revision}</version>
     </parent>
 
+    <properties>
+        <jacoco.line.minimum>0.94</jacoco.line.minimum>
+        <jacoco.branch.minimum>0.86</jacoco.branch.minimum>
+    </properties>
+
     <artifactId>registration-service</artifactId>
     <name>Registration Service</name>
     <description>Registers users to events by orchestrating user-service and event-service</description>

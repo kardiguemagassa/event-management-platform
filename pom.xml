@@ -30,6 +30,10 @@
         <!-- Single source of truth for the version: overridden by the release build (-Drevision=X.Y.Z, from the Git tag). -->
         <revision>0.0.0-SNAPSHOT</revision>
         <flatten-maven-plugin.version>1.8.0</flatten-maven-plugin.version>
+        <jacoco-maven-plugin.version>0.8.16</jacoco-maven-plugin.version>
+        <!-- Coverage floors (ratchet): each module sets its own just below its measured value, never lowers them. -->
+        <jacoco.line.minimum>0.80</jacoco.line.minimum>
+        <jacoco.branch.minimum>0.60</jacoco.branch.minimum>
         <java.version>21</java.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
         <springdoc.version>3.2.0</springdoc.version>
@@ -105,6 +109,59 @@
                 <configuration>
                     <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar}</argLine>
                 </configuration>
+            </plugin>
+            <!-- Coverage of unit and integration tests: the agent is added to @{argLine}, used by surefire and failsafe. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco-maven-plugin.version}</version>
+                <configuration>
+                    <excludes>
+                        <!-- Entry points only: no logic to cover. -->
+                        <exclude>**/*Application.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <!-- Installed and deployed POMs carry the actual version instead of ${revision}. -->
             <plugin>

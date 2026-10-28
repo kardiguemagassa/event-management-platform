@@ -10,6 +10,11 @@
         <version>${revision}</version>
     </parent>
 
+    <properties>
+        <jacoco.line.minimum>0.98</jacoco.line.minimum>
+        <jacoco.branch.minimum>0.84</jacoco.branch.minimum>
+    </properties>
+
     <artifactId>event-service</artifactId>
     <name>Event Service</name>
     <description>Manages events and their capacity</description>

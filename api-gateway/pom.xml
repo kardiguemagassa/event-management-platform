@@ -10,6 +10,11 @@
         <version>${revision}</version>
     </parent>
 
+    <properties>
+        <jacoco.line.minimum>0.96</jacoco.line.minimum>
+        <jacoco.branch.minimum>0.63</jacoco.branch.minimum>
+    </properties>
+
     <artifactId>api-gateway</artifactId>
     <name>API Gateway</name>
     <description>Single entry point routing requests to backend services</description>
