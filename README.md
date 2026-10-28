@@ -17,10 +17,11 @@ docker compose --profile app up -d --build
 docker compose --profile app ps          # wait until the 8 containers are (healthy)
 ```
 
-| URL                     | Purpose                                   |
-|-------------------------|-------------------------------------------|
-| `http://localhost:8080` | API Gateway, the single entry point       |
-| `http://localhost:8761` | Eureka dashboard                          |
+| URL                                     | Purpose                                            |
+|-----------------------------------------|----------------------------------------------------|
+| `http://localhost:8080`                 | API Gateway, the single entry point                |
+| `http://localhost:8080/swagger-ui.html` | Swagger UI of all services (Select a definition)   |
+| `http://localhost:8761`                 | Eureka dashboard                                   |
 
 Published ports are bound to `127.0.0.1` only. The services publish no port: they are reachable through the gateway.
 
@@ -30,8 +31,9 @@ Published ports are bound to `127.0.0.1` only. The services publish no port: the
 docker compose up -d                     # databases only (ports 5433, 5434, 5435)
 ```
 
-Then start `discovery-server` first, followed by the other services. Each service exposes its Swagger UI,
-for example `http://localhost:8083/swagger-ui/index.html`.
+Then start `discovery-server` first, followed by the other services. The aggregated Swagger UI works here too
+(`http://localhost:8080/swagger-ui.html`), and each service also serves its own, for example
+`http://localhost:8083/swagger-ui/index.html`.
 
 > Do not run both options at the same time. Containers publish on `127.0.0.1` while the IDE binds every
 > interface, so both can hold the same port and register in the same Eureka, which mixes the instances.
