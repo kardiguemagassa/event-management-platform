@@ -32,7 +32,7 @@ public class ForwardedHeadersOverrideFilter implements HttpHeadersFilter, Ordere
     static final String FORWARDED = "Forwarded";
 
     @Override
-    public HttpHeaders filter(@NonNull HttpHeaders input, ServerWebExchange exchange) {
+    public @NonNull HttpHeaders filter(@NonNull HttpHeaders input, ServerWebExchange exchange) {
         ServerHttpRequest request = exchange.getRequest();
         URI uri = request.getURI();
         String host = request.getHeaders().getFirst(HttpHeaders.HOST);

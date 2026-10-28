@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.filter;
 
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -29,7 +30,7 @@ public class RequestLoggingFilter implements WebFilter {
     private static final String ACTUATOR_PATH = "/actuator";
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+    public @NonNull Mono<Void> filter(ServerWebExchange exchange, @NonNull WebFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getRawPath();
 
