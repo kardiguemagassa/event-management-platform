@@ -8,13 +8,23 @@ ARG JAVA_VERSION=21
 FROM eclipse-temurin:${JAVA_VERSION}-jdk AS build
 # The Maven wrapper downloads and unpacks Maven itself. Installed before ARG MODULE: one cached layer for all modules.
 RUN apt-get update && apt-get install --yes --no-install-recommends curl unzip && rm -rf /var/lib/apt/lists/*
-ARG MODULE
-RUN test -n "${MODULE}" || (echo "Build argument MODULE is required" && exit 1)
 WORKDIR /workspace
 
-# Wrapper and POMs first: this layer, and the dependency download, stay cached until a pom.xml changes.
+# Maven goes into an image layer shared by every module, outside the cache mount used below: parallel builds
+# on a cold cache would otherwise race to unpack the same distribution into /root/.m2/wrapper.
+ENV MAVEN_USER_HOME=/opt/maven-wrapper
 COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
+COPY mvnw ./
+RUN ./mvnw --batch-mode --version > /dev/null
+
+# Parallel builds share the local repository (cache mount): file locks keep concurrent downloads safe.
+ENV MAVEN_ARGS="-Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav"
+
+ARG MODULE
+RUN test -n "${MODULE}" || (echo "Build argument MODULE is required" && exit 1)
+
+# POMs first: the dependency download stays cached until a pom.xml changes.
+COPY pom.xml ./
 COPY discovery-server/pom.xml discovery-server/
 COPY api-gateway/pom.xml api-gateway/
 COPY user-service/pom.xml user-service/
