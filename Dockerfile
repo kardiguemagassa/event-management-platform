@@ -5,7 +5,8 @@
 
 ARG JAVA_VERSION=21
 
-FROM eclipse-temurin:${JAVA_VERSION}-jdk AS build
+# Java bytecode is the same on every platform: compile once, natively, then assemble a runtime per platform.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:${JAVA_VERSION}-jdk AS build
 # The Maven wrapper downloads and unpacks Maven itself. Installed before ARG MODULE: one cached layer for all modules.
 RUN apt-get update && apt-get install --yes --no-install-recommends curl unzip && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
