@@ -51,7 +51,9 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, info
+        # circuitbreakers / circuitbreakerevents: state and transition history of the downstream circuits.
+        # Internal only: services publish no port (Docker) and the gateway routes no /actuator path.
+        include: health, info, circuitbreakers, circuitbreakerevents
   endpoint:
     health:
       probes:
