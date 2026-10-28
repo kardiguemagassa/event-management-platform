@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.resilience;
 
+import org.jspecify.annotations.NonNull;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
@@ -17,7 +18,7 @@ class OriginalPathFilter implements WebFilter, Ordered {
     static final String ATTRIBUTE = OriginalPathFilter.class.getName() + ".path";
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+    public @NonNull Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         exchange.getAttributes().putIfAbsent(ATTRIBUTE, exchange.getRequest().getPath().value());
         return chain.filter(exchange);
     }

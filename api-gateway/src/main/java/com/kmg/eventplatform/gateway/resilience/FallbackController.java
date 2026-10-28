@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.resilience;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -20,6 +21,8 @@ import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.C
  * Target of the CircuitBreaker route filters ({@code forward:/fallback/unavailable}), for any HTTP method.
  * Turns a routing failure into an RFC 9457 problem with a stable code, like the services do.
  */
+// Internal forward target of the CircuitBreaker filter, not a public endpoint.
+@Hidden
 @RestController
 class FallbackController {
 

@@ -64,6 +64,38 @@ spring:
                     methods: GET
                     series: ""
                     exceptions: java.io.IOException
+            # API docs of each service, aggregated by the Swagger UI (see springdoc below). Docs only:
+            # no circuit breaker or retry. Not under /v3/api-docs, which the gateway's own springdoc
+            # controller serves before any route is evaluated.
+            - id: user-service-api-docs
+              uri: ${USER_SERVICE_URI:lb://user-service}
+              predicates:
+                - Path=/api-docs/user-service
+              filters:
+                - SetPath=/v3/api-docs
+            - id: event-service-api-docs
+              uri: ${EVENT_SERVICE_URI:lb://event-service}
+              predicates:
+                - Path=/api-docs/event-service
+              filters:
+                - SetPath=/v3/api-docs
+            - id: registration-service-api-docs
+              uri: ${REGISTRATION_SERVICE_URI:lb://registration-service}
+              predicates:
+                - Path=/api-docs/registration-service
+              filters:
+                - SetPath=/v3/api-docs
+
+springdoc:
+  swagger-ui:
+    # A single Swagger UI for the whole platform: http://localhost:8080/swagger-ui.html
+    urls:
+      - name: User
+        url: /api-docs/user-service
+      - name: Event
+        url: /api-docs/event-service
+      - name: Registration
+        url: /api-docs/registration-service
 
 eureka:
   client:
