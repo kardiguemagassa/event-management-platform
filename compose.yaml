@@ -211,6 +211,9 @@ services:
       REGISTRATION_DB_NAME: ${REGISTRATION_DB_NAME:-registration_db}
       REGISTRATION_DB_USERNAME: ${REGISTRATION_DB_USERNAME:?REGISTRATION_DB_USERNAME is required}
       REGISTRATION_DB_PASSWORD: ${REGISTRATION_DB_PASSWORD:?REGISTRATION_DB_PASSWORD is required}
+      # Client credentials of its service account, token requested from Keycloak on the compose network.
+      REGISTRATION_SERVICE_CLIENT_SECRET: ${REGISTRATION_SERVICE_CLIENT_SECRET:?REGISTRATION_SERVICE_CLIENT_SECRET is required}
+      KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/event-platform/protocol/openid-connect/token
     depends_on:
       registration-db:
         condition: service_healthy

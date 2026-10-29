@@ -9,6 +9,7 @@ import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
@@ -25,6 +26,7 @@ final class FakeDownstream {
     private final HttpServer server;
     private final Queue<Answer> script = new ConcurrentLinkedQueue<>();
     private final AtomicInteger requests = new AtomicInteger();
+    private final Queue<String> authorizations = new ConcurrentLinkedQueue<>();
 
     private FakeDownstream(HttpServer server) {
         this.server = server;
@@ -59,9 +61,15 @@ final class FakeDownstream {
         return requests.get();
     }
 
+    /** Authorization header of each request since the last reset, "" when absent. */
+    List<String> authorizations() {
+        return List.copyOf(authorizations);
+    }
+
     void reset() {
         script.clear();
         requests.set(0);
+        authorizations.clear();
     }
 
     void stop() {
@@ -70,6 +78,8 @@ final class FakeDownstream {
 
     private void handle(HttpExchange exchange) throws IOException {
         requests.incrementAndGet();
+        String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+        authorizations.add(authorization == null ? "" : authorization);
         Answer answer = script.poll();
         if (answer == null) {
             answer = new Answer(200, "{}", Duration.ZERO);

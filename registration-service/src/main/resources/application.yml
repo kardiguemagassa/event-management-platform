@@ -11,6 +11,25 @@ spring:
       enabled: true
   application:
     name: registration-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Keys from the JWK set URI (internal Keycloak URL in containers); issuer and audience still checked.
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/event-platform}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/event-platform/protocol/openid-connect/certs}
+          audiences: event-platform-api
+      client:
+        # Service account of registration-service (client credentials): its own calls to event-service.
+        registration:
+          event-platform:
+            provider: keycloak
+            client-id: registration-service
+            client-secret: ${REGISTRATION_SERVICE_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+        provider:
+          keycloak:
+            token-uri: ${KEYCLOAK_TOKEN_URI:http://localhost:8180/realms/event-platform/protocol/openid-connect/token}
   config:
     import:
       - optional:file:.env[.properties]
