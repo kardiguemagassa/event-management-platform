@@ -34,7 +34,7 @@ class ApiDocsIT {
         assertThat(info).containsEntry("title", "User Service API");
 
         Map<String, Object> paths = (Map<String, Object>) doc.get("paths");
-        assertThat(paths).containsKeys("/api/users", "/api/users/{id}");
+        assertThat(paths).containsKeys("/api/users", "/api/users/{id}", "/api/users/me");
         assertThat(paths.keySet()).allMatch(path -> path.startsWith("/api/"));
 
         Map<String, Object> components = (Map<String, Object>) doc.get("components");

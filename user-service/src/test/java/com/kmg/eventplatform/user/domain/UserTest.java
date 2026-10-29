@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.Locale;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -15,10 +16,11 @@ class UserTest {
     private static final Instant NOW = Instant.parse("2026-10-26T10:00:00Z");
 
     @Test
-    void registerNormalizesInputAndAssignsIdentity() {
-        User user = User.register("  Ada Lovelace  ", "  Ada.Lovelace@Example.COM ", NOW);
+    void registerNormalizesInputAndKeepsTheKeycloakId() {
+        UUID keycloakId = UUID.randomUUID();
+        User user = User.register(keycloakId, "  Ada Lovelace  ", "  Ada.Lovelace@Example.COM ", NOW);
 
-        assertThat(user.getId()).isNotNull();
+        assertThat(user.getId()).isEqualTo(keycloakId);
         assertThat(user.getFullName()).isEqualTo("Ada Lovelace");
         assertThat(user.getEmail()).isEqualTo("ada.lovelace@example.com");
         assertThat(user.getCreatedAt()).isEqualTo(NOW);
@@ -29,7 +31,7 @@ class UserTest {
     @NullAndEmptySource
     @ValueSource(strings = "   ")
     void registerRejectsBlankFullName(String fullName) {
-        assertThatThrownBy(() -> User.register(fullName, "ada@example.com", NOW))
+        assertThatThrownBy(() -> User.register(UUID.randomUUID(), fullName, "ada@example.com", NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("fullName");
     }
@@ -38,7 +40,7 @@ class UserTest {
     @NullAndEmptySource
     @ValueSource(strings = "   ")
     void registerRejectsBlankEmail(String email) {
-        assertThatThrownBy(() -> User.register("Ada Lovelace", email, NOW))
+        assertThatThrownBy(() -> User.register(UUID.randomUUID(), "Ada Lovelace", email, NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("email");
     }
@@ -56,8 +58,14 @@ class UserTest {
     }
 
     @Test
+    void registerRequiresTheKeycloakId() {
+        assertThatThrownBy(() -> User.register(null, "Ada Lovelace", "ada@example.com", NOW))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
     void changeDetailsAppliesTheSameRules() {
-        User user = User.register("Ada Lovelace", "ada@example.com", NOW);
+        User user = User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW);
 
         user.changeDetails(" Ada King ", "ADA.KING@example.com");
 
@@ -68,8 +76,8 @@ class UserTest {
 
     @Test
     void equalityIsBasedOnIdentity() {
-        User ada = User.register("Ada Lovelace", "ada@example.com", NOW);
-        User sameEmail = User.register("Ada Lovelace", "ada@example.com", NOW);
+        User ada = User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW);
+        User sameEmail = User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW);
 
         assertThat(ada).isEqualTo(ada).isNotEqualTo(sameEmail);
     }

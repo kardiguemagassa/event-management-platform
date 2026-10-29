@@ -30,7 +30,7 @@ class UserRepositoryTest {
 
     @Test
     void persistsAndReloadsAllFields() {
-        User saved = repository.saveAndFlush(User.register("Ada Lovelace", "ada@example.com", NOW));
+        User saved = repository.saveAndFlush(User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW));
         entityManager.clear();
 
         User reloaded = repository.findById(saved.getId()).orElseThrow();
@@ -42,17 +42,9 @@ class UserRepositoryTest {
     }
 
     @Test
-    void existsByEmailFindsStoredEmail() {
-        repository.saveAndFlush(User.register("Ada Lovelace", "ada@example.com", NOW));
-
-        assertThat(repository.existsByEmail("ada@example.com")).isTrue();
-        assertThat(repository.existsByEmail("grace@example.com")).isFalse();
-    }
-
-    @Test
     void existsByEmailAndIdNotIgnoresTheUserItself() {
-        User ada = repository.saveAndFlush(User.register("Ada Lovelace", "ada@example.com", NOW));
-        User grace = repository.saveAndFlush(User.register("Grace Hopper", "grace@example.com", NOW));
+        User ada = repository.saveAndFlush(User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW));
+        User grace = repository.saveAndFlush(User.register(UUID.randomUUID(), "Grace Hopper", "grace@example.com", NOW));
 
         assertThat(repository.existsByEmailAndIdNot("ada@example.com", ada.getId())).isFalse();
         assertThat(repository.existsByEmailAndIdNot("ada@example.com", grace.getId())).isTrue();
@@ -60,9 +52,9 @@ class UserRepositoryTest {
 
     @Test
     void databaseRejectsDuplicateEmail() {
-        repository.saveAndFlush(User.register("Ada Lovelace", "ada@example.com", NOW));
+        repository.saveAndFlush(User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW));
 
-        assertThatThrownBy(() -> repository.saveAndFlush(User.register("Ada Bis", "ada@example.com", NOW)))
+        assertThatThrownBy(() -> repository.saveAndFlush(User.register(UUID.randomUUID(), "Ada Bis", "ada@example.com", NOW)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -80,7 +72,7 @@ class UserRepositoryTest {
 
     @Test
     void versionIncrementsOnUpdate() {
-        User user = repository.saveAndFlush(User.register("Ada Lovelace", "ada@example.com", NOW));
+        User user = repository.saveAndFlush(User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW));
         assertThat(user.getVersion()).isZero();
 
         user.changeDetails("Ada King", "ada@example.com");

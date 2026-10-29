@@ -64,6 +64,11 @@ public final class TestTokens {
         return sign(claims(subject, realmRoles), SIGNING_KEY);
     }
 
+    /** Like a Keycloak token with the "email" scope: the e-mail claim, used by user-service for profiles. */
+    public static String withEmail(UUID subject, String email, String... realmRoles) {
+        return sign(claims(subject, realmRoles).claim("email", email), SIGNING_KEY);
+    }
+
     public static String expired() {
         Instant past = Instant.now().minus(Duration.ofMinutes(10));
         return sign(claims(UUID.randomUUID())
