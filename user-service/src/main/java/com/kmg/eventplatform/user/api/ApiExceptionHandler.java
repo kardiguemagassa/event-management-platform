@@ -39,6 +39,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.CONFLICT, "Email already used", ex.getMessage(), "EMAIL_ALREADY_USED");
     }
 
+    @ExceptionHandler(EmailClaimMissingException.class)
+    ProblemDetail handleEmailClaimMissing(EmailClaimMissingException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "E-mail claim missing", ex.getMessage(), "EMAIL_CLAIM_MISSING");
+    }
+
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ProblemDetail handleConcurrentModification(OptimisticLockingFailureException ex) {
         return problem(HttpStatus.CONFLICT, "Concurrent modification",

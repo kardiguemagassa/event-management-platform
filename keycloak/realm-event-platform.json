@@ -29,6 +29,10 @@
         "description": "Technical role: reserves and releases seats (registration-service only)"
       },
       {
+        "name": "ADMIN",
+        "description": "Administers the platform: reads and deletes any user profile"
+      },
+      {
         "name": "offline_access"
       },
       {

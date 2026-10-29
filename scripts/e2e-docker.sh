@@ -30,6 +30,7 @@ admin() {
 E2E_CLIENT=e2e-tests
 E2E_USER="e2e.$TS@example.com"        # organizer and attendee: drives the whole scenario
 E2E_OTHER="e2e.other.$TS@example.com" # another organizer: must not change the events of the first one
+E2E_ADMIN="e2e.admin.$TS@example.com" # administrator: reads every user profile
 E2E_PASSWORD=$(openssl rand -hex 16)
 TOKEN=""; TOKEN_AT=0
 # Access tokens live 5 minutes and a run can last longer: renew after 4.
@@ -69,8 +70,12 @@ register() { AUTH=$(attendee_token "$1") call POST /api/registrations "{\"eventI
 
 echo "== Test identity (Keycloak admin API)"
 cleanup() {
-  local id user
-  for user in "$E2E_USER" "$E2E_OTHER" "$(attendee 1)" "$(attendee 2)" "$(attendee 3)" "$(attendee 4)"; do
+  local id user n token
+  # Profiles first, while their owners can still get a token (right to erasure: DELETE /api/users/me).
+  for n in 1 2 3 4; do
+    token=$(attendee_token "$n"); [ -n "$token" ] && AUTH=$token call DELETE /api/users/me
+  done
+  for user in "$E2E_USER" "$E2E_OTHER" "$E2E_ADMIN" "$(attendee 1)" "$(attendee 2)" "$(attendee 3)" "$(attendee 4)"; do
     id=$(first_id "$(admin GET "/users?email=$user&exact=true")"); [ -n "$id" ] && admin DELETE "/users/$id" >/dev/null
   done
   id=$(first_id "$(admin GET "/clients?clientId=$E2E_CLIENT")"); [ -n "$id" ] && admin DELETE "/clients/$id" >/dev/null
@@ -94,23 +99,33 @@ admin POST /clients "{\"clientId\":\"$E2E_CLIENT\",\"publicClient\":true,\"stand
   \"included.custom.audience\":\"event-platform-api\",\"access.token.claim\":\"true\",\"id.token.claim\":\"false\"}}]}" >/dev/null
 create_user "$E2E_USER" ORGANIZER
 create_user "$E2E_OTHER" ORGANIZER
+create_user "$E2E_ADMIN" ADMIN
 for n in 1 2 3 4; do create_user "$(attendee "$n")"; done
 refresh_token
 [ -n "$TOKEN" ] || { echo "FAIL  no access token for the test user"; exit 1; }
 echo "      test users and client ready"
 
 # Healthy containers are not routable yet: the gateway must first see each service in Eureka.
+# Routed means answered by the service itself: any status but a 5xx (gateway fallback) or no answer at all.
 echo "== Waiting for the gateway to route every service"
-for route in /api/users /api/events /api/registrations/me; do
-  for i in $(seq 1 60); do call GET "$route"; [ "$CODE" = 200 ] && break; sleep 2; done
-  [ "$CODE" = 200 ] || { echo "FAIL  the gateway does not route $route"; exit 1; }
+for route in /api/users/me /api/events /api/registrations/me; do
+  for i in $(seq 1 60); do call GET "$route"; case "$CODE" in 5*|000) sleep 2 ;; *) break ;; esac; done
+  case "$CODE" in 5*|000) echo "FAIL  the gateway does not route $route"; exit 1 ;; esac
 done
 
-echo "== Setup"
-for u in 1 2 3 4; do
-  call POST /api/users "{\"fullName\":\"Docker User $u\",\"email\":\"docker.$u.$TS@example.com\"}"
-  check "create user $u" 201
+echo "== Profiles (user-service)"
+for n in 1 2 3 4; do
+  AUTH=$(attendee_token "$n") call PUT /api/users/me "{\"fullName\":\"Attendee $n\"}"
+  check "attendee $n creates their profile" 201
 done
+AUTH=$(attendee_token 1) call GET /api/users/me
+[ "$(field email)" = "$(attendee 1)" ] && { PASS=$((PASS+1)); echo "PASS  profile e-mail comes from the token"; } \
+                                      || { FAIL=$((FAIL+1)); echo "FAIL  profile e-mail body=$BODY"; }
+AUTH=$(attendee_token 1) call GET /api/users; check "attendee cannot list the users" 403 ACCESS_DENIED
+AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_ADMIN" "$E2E_PASSWORD") call GET /api/users
+check "administrator lists the users" 200
+
+echo "== Setup"
 # registration-service needs its own view of event-service: an unknown event (404) proves it reaches it.
 E=00000000-0000-0000-0000-000000000000
 for i in $(seq 1 30); do register 1; [ "$CODE" = 404 ] && break; sleep 2; done
@@ -166,6 +181,9 @@ echo "== No seat leaked"
 SEATS=$(field availableSeats)
 [ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, attendees 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
+
+echo "== Right to erasure"
+AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204
 
 echo "== Result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

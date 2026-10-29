@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.kmg.eventplatform.user.domain.User;
 import com.kmg.eventplatform.user.domain.UserRepository;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -32,6 +34,7 @@ import org.springframework.data.domain.Pageable;
 class UserServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-26T10:00:00Z");
+    private static final UUID ADA = UUID.randomUUID();
 
     @Mock
     private UserRepository repository;
@@ -43,42 +46,84 @@ class UserServiceTest {
         service = new UserService(repository, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    private static User existingUser() {
-        return User.register("Ada Lovelace", "ada@example.com", NOW);
+    private User existingAda() {
+        User ada = User.register(ADA, "Ada Lovelace", "ada@example.com", NOW.minusSeconds(3600));
+        when(repository.findById(ADA)).thenReturn(Optional.of(ada));
+        return ada;
+    }
+
+    private static DataIntegrityViolationException violationOf(String constraint) {
+        return new DataIntegrityViolationException("could not execute",
+                new SQLException("duplicate key value violates unique constraint \"" + constraint + "\""));
     }
 
     @Nested
-    class Register {
+    class SaveProfile {
 
         @Test
-        void savesNormalizedUserWithClockTime() {
-            when(repository.existsByEmail("ada@example.com")).thenReturn(false);
+        void firstSaveCreatesTheProfileWithTheKeycloakIdAndNormalizedEmail() {
+            when(repository.findById(ADA)).thenReturn(Optional.empty());
             when(repository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-            User user = service.register(new RegisterUserCommand("Ada Lovelace", " ADA@Example.com "));
+            SavedProfile saved = service.saveProfile(ADA, "Ada Lovelace", " ADA@Example.com ");
 
-            assertThat(user.getEmail()).isEqualTo("ada@example.com");
-            assertThat(user.getCreatedAt()).isEqualTo(NOW);
+            assertThat(saved.created()).isTrue();
+            assertThat(saved.user().getId()).isEqualTo(ADA);
+            assertThat(saved.user().getEmail()).isEqualTo("ada@example.com");
+            assertThat(saved.user().getCreatedAt()).isEqualTo(NOW);
         }
 
         @Test
-        void rejectsAlreadyUsedEmailWithoutSaving() {
-            when(repository.existsByEmail("ada@example.com")).thenReturn(true);
+        void laterSaveUpdatesTheProfileAndCopiesTheEmailFromTheToken() {
+            User ada = existingAda();
 
-            assertThatThrownBy(() -> service.register(new RegisterUserCommand("Ada", "ADA@example.com")))
-                    .isInstanceOf(EmailAlreadyUsedException.class)
-                    .hasMessageContaining("ada@example.com");
+            SavedProfile saved = service.saveProfile(ADA, "Ada King", "Ada.King@example.com");
+
+            assertThat(saved.created()).isFalse();
+            assertThat(saved.user()).isSameAs(ada);
+            assertThat(ada.getFullName()).isEqualTo("Ada King");
+            assertThat(ada.getEmail()).isEqualTo("ada.king@example.com");
+            verify(repository).flush();
             verify(repository, never()).saveAndFlush(any());
         }
 
         @Test
-        void translatesConcurrentDuplicateIntoEmailAlreadyUsed() {
-            when(repository.existsByEmail("ada@example.com")).thenReturn(false);
-            when(repository.saveAndFlush(any(User.class)))
-                    .thenThrow(new DataIntegrityViolationException("uk_users_email"));
+        void emailOfAnotherProfileIsRejectedWithoutSaving() {
+            when(repository.existsByEmailAndIdNot("grace@example.com", ADA)).thenReturn(true);
 
-            assertThatThrownBy(() -> service.register(new RegisterUserCommand("Ada", "ada@example.com")))
+            assertThatThrownBy(() -> service.saveProfile(ADA, "Ada", "GRACE@example.com"))
+                    .isInstanceOf(EmailAlreadyUsedException.class)
+                    .hasMessageContaining("grace@example.com");
+            verify(repository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        void concurrentSaveTakingTheEmailIsAnEmailConflict() {
+            when(repository.findById(ADA)).thenReturn(Optional.empty());
+            when(repository.saveAndFlush(any(User.class))).thenThrow(violationOf(UserService.EMAIL_UNIQUE_CONSTRAINT));
+
+            assertThatThrownBy(() -> service.saveProfile(ADA, "Ada", "ada@example.com"))
                     .isInstanceOf(EmailAlreadyUsedException.class);
+        }
+
+        @Test
+        void concurrentFirstSavesOfTheSameProfileAreAConcurrentModification() {
+            when(repository.findById(ADA)).thenReturn(Optional.empty());
+            when(repository.saveAndFlush(any(User.class))).thenThrow(violationOf("users_pkey"));
+
+            assertThatThrownBy(() -> service.saveProfile(ADA, "Ada", "ada@example.com"))
+                    .isInstanceOf(OptimisticLockingFailureException.class)
+                    .hasMessageContaining(ADA.toString());
+        }
+
+        @Test
+        void violationWithoutDetailsIsAConcurrentModification() {
+            existingAda();
+            doThrow(new DataIntegrityViolationException(null))
+                    .when(repository).flush();
+
+            assertThatThrownBy(() -> service.saveProfile(ADA, "Ada", "ada@example.com"))
+                    .isInstanceOf(OptimisticLockingFailureException.class);
         }
     }
 
@@ -86,100 +131,48 @@ class UserServiceTest {
     class GetById {
 
         @Test
-        void returnsExistingUser() {
-            User ada = existingUser();
-            when(repository.findById(ada.getId())).thenReturn(Optional.of(ada));
+        void returnsExistingProfile() {
+            User ada = existingAda();
 
-            assertThat(service.getById(ada.getId())).isSameAs(ada);
+            assertThat(service.getById(ADA)).isSameAs(ada);
         }
 
         @Test
-        void throwsWhenUserDoesNotExist() {
-            UUID id = UUID.randomUUID();
-            when(repository.findById(id)).thenReturn(Optional.empty());
+        void profileNotSavedYetIsNotFound() {
+            when(repository.findById(ADA)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.getById(id))
+            assertThatThrownBy(() -> service.getById(ADA))
                     .isInstanceOf(UserNotFoundException.class)
-                    .hasMessageContaining(id.toString());
+                    .hasMessageContaining(ADA.toString());
         }
     }
 
     @Test
     void listDelegatesPagination() {
         Pageable pageable = PageRequest.of(0, 20);
-        Page<User> page = new PageImpl<>(List.of(existingUser()), pageable, 1);
+        Page<User> page = new PageImpl<>(List.of());
         when(repository.findAll(pageable)).thenReturn(page);
 
         assertThat(service.list(pageable)).isSameAs(page);
     }
 
     @Nested
-    class Update {
-
-        @Test
-        void changesDetailsAndFlushes() {
-            User ada = existingUser();
-            when(repository.findById(ada.getId())).thenReturn(Optional.of(ada));
-            when(repository.existsByEmailAndIdNot("ada.king@example.com", ada.getId())).thenReturn(false);
-
-            User updated = service.update(ada.getId(), new UpdateUserCommand("Ada King", "Ada.King@example.com"));
-
-            assertThat(updated.getFullName()).isEqualTo("Ada King");
-            assertThat(updated.getEmail()).isEqualTo("ada.king@example.com");
-            verify(repository).flush();
-        }
-
-        @Test
-        void rejectsEmailUsedByAnotherUser() {
-            User ada = existingUser();
-            when(repository.findById(ada.getId())).thenReturn(Optional.of(ada));
-            when(repository.existsByEmailAndIdNot("grace@example.com", ada.getId())).thenReturn(true);
-
-            assertThatThrownBy(() -> service.update(ada.getId(), new UpdateUserCommand("Ada", "grace@example.com")))
-                    .isInstanceOf(EmailAlreadyUsedException.class);
-            assertThat(ada.getEmail()).isEqualTo("ada@example.com");
-        }
-
-        @Test
-        void translatesConcurrentDuplicateIntoEmailAlreadyUsed() {
-            User ada = existingUser();
-            when(repository.findById(ada.getId())).thenReturn(Optional.of(ada));
-            when(repository.existsByEmailAndIdNot("grace@example.com", ada.getId())).thenReturn(false);
-            doThrow(new DataIntegrityViolationException("uk_users_email")).when(repository).flush();
-
-            assertThatThrownBy(() -> service.update(ada.getId(), new UpdateUserCommand("Ada", "grace@example.com")))
-                    .isInstanceOf(EmailAlreadyUsedException.class);
-        }
-
-        @Test
-        void throwsWhenUserDoesNotExist() {
-            UUID id = UUID.randomUUID();
-            when(repository.findById(id)).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> service.update(id, new UpdateUserCommand("Ada", "ada@example.com")))
-                    .isInstanceOf(UserNotFoundException.class);
-        }
-    }
-
-    @Nested
     class Delete {
 
         @Test
-        void deletesExistingUser() {
-            User ada = existingUser();
-            when(repository.findById(ada.getId())).thenReturn(Optional.of(ada));
+        void deletesExistingProfile() {
+            User ada = existingAda();
 
-            service.delete(ada.getId());
+            service.delete(ADA);
 
             verify(repository).delete(ada);
         }
 
         @Test
-        void throwsWhenUserDoesNotExistAndDeletesNothing() {
-            UUID id = UUID.randomUUID();
-            when(repository.findById(id)).thenReturn(Optional.empty());
+        void throwsWhenProfileDoesNotExistAndDeletesNothing() {
+            when(repository.findById(ADA)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> service.delete(id)).isInstanceOf(UserNotFoundException.class);
+            assertThatThrownBy(() -> service.delete(ADA)).isInstanceOf(UserNotFoundException.class);
             verify(repository, never()).delete(any());
         }
     }

@@ -33,11 +33,13 @@ class OpenApiConfig {
                 .info(new Info()
                         .title("User Service API")
                         .version(version)
-                        .description("Manages platform users. Errors follow RFC 9457 and carry a stable `code`."))
+                        .description("Application profiles of the users; identity (credentials, e-mail, roles) "
+                                + "is managed by Keycloak. Errors follow RFC 9457 and carry a stable `code`."))
                 .components(new Components()
                         .addSchemas("ProblemDetail", problemDetailSchema())
-                        .addResponses("BadRequest", problemResponse("Invalid request (validation, malformed JSON, invalid sort)"))
-                        .addResponses("NotFound", problemResponse("Resource not found"))
+                        .addResponses("BadRequest", problemResponse(
+                                "Invalid request (validation, malformed JSON, invalid sort, no e-mail in the token)"))
+                        .addResponses("NotFound", problemResponse("Profile not found (not saved yet, or deleted)"))
                         .addResponses("Conflict", problemResponse("Conflict (email already used, concurrent modification)")));
     }
 
