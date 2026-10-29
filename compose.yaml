@@ -77,6 +77,55 @@ services:
       timeout: 3s
       retries: 10
 
+  keycloak-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB_NAME:-keycloak_db}
+      POSTGRES_USER: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql
+    networks: [keycloak-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Identity provider, realm imported from ./keycloak at first start (an existing realm is never overwritten).
+  # Development mode (plain HTTP); production would run "start" behind TLS.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_DB_NAME:-keycloak_db}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?KEYCLOAK_ADMIN_USERNAME is required}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      # Tokens carry the public URL seen by the browser; containers reach Keycloak as keycloak:8080.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Placeholder resolved in the realm file at import: no secret in Git.
+      REGISTRATION_SERVICE_CLIENT_SECRET: ${REGISTRATION_SERVICE_CLIENT_SECRET:?REGISTRATION_SERVICE_CLIENT_SECRET is required}
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    networks: [default, keycloak-net]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl: plain bash on the management port.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
   discovery-server:
     <<: *spring-service
     image: ${IMAGE_NAMESPACE:-local}/event-platform-discovery-server:${IMAGE_TAG:-dev}
@@ -191,6 +240,7 @@ volumes:
   user-db-data:
   event-db-data:
   registration-db-data:
+  keycloak-db-data:
 
 networks:
   # One private network per service and its database: a database is reachable by its owner only.
@@ -198,3 +248,4 @@ networks:
   user-net:
   event-net:
   registration-net:
+  keycloak-net:
