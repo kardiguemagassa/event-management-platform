@@ -2,9 +2,9 @@ package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventFullException;
+import com.kmg.eventplatform.registration.application.NotEventOrganizerException;
 import com.kmg.eventplatform.registration.application.RegistrationNotFoundException;
 import com.kmg.eventplatform.registration.application.RegistrationService;
-import com.kmg.eventplatform.registration.application.UserNotFoundException;
 import com.kmg.eventplatform.registration.domain.Registration;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
 import com.kmg.eventplatform.registration.infrastructure.security.SecurityConfig;
@@ -20,7 +20,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -60,7 +62,7 @@ class RegistrationControllerTest {
     @Autowired
     private MockMvc anonymous;
 
-    /** Every request carries a valid access token: these tests are about the API contract. */
+    /** Every request is made by userId, attendee and organizer: these tests are about the API contract. */
     private MockMvc mockMvc;
 
     /** Tokens are built by jwt() below: no decoding, no Keycloak. */
@@ -78,8 +80,69 @@ class RegistrationControllerTest {
     void authenticateEveryRequest() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(springSecurity())
-                .defaultRequest(get("/").with(jwt()))
+                .defaultRequest(get("/").with(caller(userId, "ATTENDEE", "ORGANIZER")))
                 .build();
+    }
+
+    private static JwtRequestPostProcessor caller(UUID id, String... roles) {
+        SimpleGrantedAuthority[] authorities = new SimpleGrantedAuthority[roles.length];
+        for (int i = 0; i < roles.length; i++) {
+            authorities[i] = new SimpleGrantedAuthority("ROLE_" + roles[i]);
+        }
+        return jwt().jwt(token -> token.subject(id.toString())).authorities(authorities);
+    }
+
+    @Test
+    void onlyAttendeesRegister() throws Exception {
+        anonymous.perform(post("/api/registrations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"eventId\":\"" + eventId + "\"}")
+                        .with(caller(userId, "ORGANIZER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void userIdSentInTheBodyIsIgnored() throws Exception {
+        UUID someoneElse = UUID.randomUUID();
+        when(service.register(eventId, userId)).thenReturn(registration);
+
+        mockMvc.perform(post("/api/registrations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"eventId\":\"" + eventId + "\",\"userId\":\"" + someoneElse + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.userId").value(userId.toString()));
+    }
+
+    @Test
+    void onlyOrganizersListTheRegistrationsOfAnEvent() throws Exception {
+        anonymous.perform(get("/api/registrations/events/{eventId}", eventId).with(caller(userId, "ATTENDEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void organizerOfAnotherEventIsForbidden() throws Exception {
+        when(service.findByEvent(eq(eventId), eq(userId), argThat(newestFirst())))
+                .thenThrow(new NotEventOrganizerException(eventId));
+
+        mockMvc.perform(get("/api/registrations/events/{eventId}", eventId))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("NOT_EVENT_ORGANIZER"));
+    }
+
+    @Test
+    void mineListsTheCallersRegistrations() throws Exception {
+        when(service.findByUser(eq(userId), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/registrations/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].userId").value(userId.toString()));
     }
 
     @Test
@@ -96,7 +159,7 @@ class RegistrationControllerTest {
     void registerReturnsCreatedWithLocation() throws Exception {
         when(service.register(eventId, userId)).thenReturn(registration);
 
-        register(eventId, userId)
+        register(eventId)
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", endsWith("/api/registrations/" + registration.getId())))
                 .andExpect(jsonPath("$.id").value(registration.getId().toString()))
@@ -109,24 +172,14 @@ class RegistrationControllerTest {
         mockMvc.perform(post("/api/registrations").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.errors.eventId").exists())
-                .andExpect(jsonPath("$.errors.userId").exists());
-    }
-
-    @Test
-    void unknownUserIsNotFound() throws Exception {
-        when(service.register(eventId, userId)).thenThrow(new UserNotFoundException(userId));
-
-        register(eventId, userId)
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
+                .andExpect(jsonPath("$.errors.eventId").exists());
     }
 
     @Test
     void fullEventIsAConflict() throws Exception {
         when(service.register(eventId, userId)).thenThrow(new EventFullException(eventId));
 
-        register(eventId, userId)
+        register(eventId)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("EVENT_FULL"));
     }
@@ -136,7 +189,7 @@ class RegistrationControllerTest {
         when(service.register(eventId, userId))
                 .thenThrow(new DownstreamUnavailableException("event-service", "read timed out"));
 
-        register(eventId, userId)
+        register(eventId)
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("DOWNSTREAM_UNAVAILABLE"))
                 .andExpect(jsonPath("$.detail", not(containsString("event-service"))));
@@ -144,7 +197,7 @@ class RegistrationControllerTest {
 
     @Test
     void getReturnsRegistration() throws Exception {
-        when(service.get(registration.getId())).thenReturn(registration);
+        when(service.get(registration.getId(), userId)).thenReturn(registration);
 
         mockMvc.perform(get("/api/registrations/{id}", registration.getId()))
                 .andExpect(status().isOk())
@@ -154,7 +207,7 @@ class RegistrationControllerTest {
     @Test
     void unknownRegistrationIsNotFound() throws Exception {
         UUID unknown = UUID.randomUUID();
-        when(service.get(unknown)).thenThrow(new RegistrationNotFoundException(unknown));
+        when(service.get(unknown, userId)).thenThrow(new RegistrationNotFoundException(unknown));
 
         mockMvc.perform(get("/api/registrations/{id}", unknown))
                 .andExpect(status().isNotFound())
@@ -171,7 +224,7 @@ class RegistrationControllerTest {
     void cancelReturnsCancelledRegistration() throws Exception {
         Registration cancelled = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
         cancelled.cancel(NOW.plusSeconds(60));
-        when(service.cancel(cancelled.getId())).thenReturn(cancelled);
+        when(service.cancel(cancelled.getId(), userId)).thenReturn(cancelled);
 
         mockMvc.perform(post("/api/registrations/{id}/cancel", cancelled.getId()))
                 .andExpect(status().isOk())
@@ -181,7 +234,7 @@ class RegistrationControllerTest {
 
     @Test
     void cancellingTwiceIsAConflict() throws Exception {
-        when(service.cancel(registration.getId()))
+        when(service.cancel(registration.getId(), userId))
                 .thenThrow(new RegistrationAlreadyCancelledException(registration.getId()));
 
         mockMvc.perform(post("/api/registrations/{id}/cancel", registration.getId()))
@@ -191,7 +244,7 @@ class RegistrationControllerTest {
 
     @Test
     void concurrentCancellationIsAConflict() throws Exception {
-        when(service.cancel(registration.getId()))
+        when(service.cancel(registration.getId(), userId))
                 .thenThrow(new ObjectOptimisticLockingFailureException(Registration.class, registration.getId()));
 
         mockMvc.perform(post("/api/registrations/{id}/cancel", registration.getId()))
@@ -201,7 +254,7 @@ class RegistrationControllerTest {
 
     @Test
     void listByEventIsPagedNewestFirstByDefault() throws Exception {
-        when(service.findByEvent(eq(eventId), argThat(newestFirst())))
+        when(service.findByEvent(eq(eventId), eq(userId), argThat(newestFirst())))
                 .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/api/registrations/events/{eventId}", eventId))
@@ -212,16 +265,16 @@ class RegistrationControllerTest {
     }
 
     @Test
-    void listByUserRejectsUnsupportedSort() throws Exception {
-        mockMvc.perform(get("/api/registrations/users/{userId}", userId).param("sort", "status"))
+    void mineRejectsUnsupportedSort() throws Exception {
+        mockMvc.perform(get("/api/registrations/me").param("sort", "status"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SORT_PROPERTY"));
     }
 
-    private ResultActions register(UUID event, UUID user) throws Exception {
+    private ResultActions register(UUID event) throws Exception {
         return mockMvc.perform(post("/api/registrations")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"eventId\":\"" + event + "\",\"userId\":\"" + user + "\"}"));
+                .content("{\"eventId\":\"" + event + "\"}"));
     }
 
     private static ArgumentMatcher<Pageable> newestFirst() {

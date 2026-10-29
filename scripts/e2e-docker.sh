@@ -62,24 +62,28 @@ check() { # LABEL EXPECTED_STATUS [EXPECTED_CODE]
     FAIL=$((FAIL+1)); echo "FAIL  $1 -> $CODE (expected $2 ${3:-}) body=$BODY"
   fi
 }
-register() { call POST /api/registrations "{\"eventId\":\"$E\",\"userId\":\"$1\"}"; }
+# Attendees 1 to 4 (default ATTENDEE role only): each registers with their own token, never a user id.
+attendee() { echo "e2e.attendee.$1.$TS@example.com"; }
+attendee_token() { kc_token event-platform "$E2E_CLIENT" "$(attendee "$1")" "$E2E_PASSWORD"; }
+register() { AUTH=$(attendee_token "$1") call POST /api/registrations "{\"eventId\":\"$E\"}"; }
 
 echo "== Test identity (Keycloak admin API)"
 cleanup() {
   local id user
-  for user in "$E2E_USER" "$E2E_OTHER"; do
+  for user in "$E2E_USER" "$E2E_OTHER" "$(attendee 1)" "$(attendee 2)" "$(attendee 3)" "$(attendee 4)"; do
     id=$(first_id "$(admin GET "/users?email=$user&exact=true")"); [ -n "$id" ] && admin DELETE "/users/$id" >/dev/null
   done
   id=$(first_id "$(admin GET "/clients?clientId=$E2E_CLIENT")"); [ -n "$id" ] && admin DELETE "/clients/$id" >/dev/null
   return 0
 }
-# create_user EMAIL -> organizer (ORGANIZER on top of the default ATTENDEE role), password $E2E_PASSWORD
+# create_user EMAIL [REALM_ROLE] -> test user with the default ATTENDEE role, plus REALM_ROLE if given
 create_user() {
   admin POST /users "{\"username\":\"$1\",\"email\":\"$1\",\"emailVerified\":true,\"enabled\":true,
     \"firstName\":\"E2E\",\"lastName\":\"Tester\",
     \"credentials\":[{\"type\":\"password\",\"value\":\"$E2E_PASSWORD\",\"temporary\":false}]}" >/dev/null
+  [ $# -ge 2 ] || return 0
   local id; id=$(first_id "$(admin GET "/users?email=$1&exact=true")")
-  admin POST "/users/$id/role-mappings/realm" "[$(admin GET /roles/ORGANIZER)]" >/dev/null
+  admin POST "/users/$id/role-mappings/realm" "[$(admin GET "/roles/$2")]" >/dev/null
 }
 cleanup  # a previous interrupted run may have left its client behind
 trap cleanup EXIT
@@ -88,15 +92,16 @@ admin POST /clients "{\"clientId\":\"$E2E_CLIENT\",\"publicClient\":true,\"stand
   \"directAccessGrantsEnabled\":true,\"protocolMappers\":[{\"name\":\"event-platform-api audience\",
   \"protocol\":\"openid-connect\",\"protocolMapper\":\"oidc-audience-mapper\",\"config\":{
   \"included.custom.audience\":\"event-platform-api\",\"access.token.claim\":\"true\",\"id.token.claim\":\"false\"}}]}" >/dev/null
-create_user "$E2E_USER"
-create_user "$E2E_OTHER"
+create_user "$E2E_USER" ORGANIZER
+create_user "$E2E_OTHER" ORGANIZER
+for n in 1 2 3 4; do create_user "$(attendee "$n")"; done
 refresh_token
 [ -n "$TOKEN" ] || { echo "FAIL  no access token for the test user"; exit 1; }
 echo "      test users and client ready"
 
 # Healthy containers are not routable yet: the gateway must first see each service in Eureka.
 echo "== Waiting for the gateway to route every service"
-for route in /api/users /api/events /api/registrations/users/00000000-0000-0000-0000-000000000000; do
+for route in /api/users /api/events /api/registrations/me; do
   for i in $(seq 1 60); do call GET "$route"; [ "$CODE" = 200 ] && break; sleep 2; done
   [ "$CODE" = 200 ] || { echo "FAIL  the gateway does not route $route"; exit 1; }
 done
@@ -104,12 +109,12 @@ done
 echo "== Setup"
 for u in 1 2 3 4; do
   call POST /api/users "{\"fullName\":\"Docker User $u\",\"email\":\"docker.$u.$TS@example.com\"}"
-  check "create user $u" 201; eval "U$u=$(field id)"
+  check "create user $u" 201
 done
-# registration-service needs its own view of both dependencies: an unknown event (404) proves it reaches them.
+# registration-service needs its own view of event-service: an unknown event (404) proves it reaches it.
 E=00000000-0000-0000-0000-000000000000
-for i in $(seq 1 30); do register "$U1"; [ "$CODE" = 404 ] && break; sleep 2; done
-check "registration-service reaches user-service and event-service" 404
+for i in $(seq 1 30); do register 1; [ "$CODE" = 404 ] && break; sleep 2; done
+check "registration-service reaches event-service" 404
 call POST /api/events '{"title":"Docker Day","location":"Paris","startAt":"2027-03-15T18:00:00Z","capacity":2}'
 check "create event (capacity 2)" 201; E=$(field id)
 AUTH=none call GET "/api/events/$E"; check "draft hidden from anonymous callers" 404 EVENT_NOT_FOUND
@@ -126,25 +131,31 @@ AUTH=none call GET "/api/events/$E"; check "anonymous read of the public catalog
 call POST "/api/events/$E/capacity/reserve" '{}'; check "internal capacity route closed at the edge" 403 ACCESS_DENIED
 
 echo "== Business rules"
-register "$U1"; check "register user 1" 201; R1=$(field id)
-register "$U1"; check "duplicate user 1" 409 ALREADY_REGISTERED
-register "$U2"; check "register user 2" 201; R2=$(field id)
-register "$U3"; echo "      user 3 on full event -> $CODE $(field code)"
-call POST "/api/registrations/$R1/cancel"; echo "      cancel user 1 -> $CODE"
-register "$U3"; check "register user 3 on freed seat" 201
-call POST "/api/registrations/$R2/cancel"; echo "      cancel user 2 -> $CODE (1 seat left for the outage test)"
+register 1; check "register attendee 1" 201; R1=$(field id)
+register 1; check "duplicate attendee 1" 409 ALREADY_REGISTERED
+register 2; check "register attendee 2" 201; R2=$(field id)
+AUTH=$(attendee_token 2) call POST "/api/registrations/$R1/cancel"
+check "another attendee cannot cancel the registration" 404 REGISTRATION_NOT_FOUND
+call GET "/api/registrations/events/$E"; check "organizer lists the registrations of the event" 200
+AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_OTHER" "$E2E_PASSWORD") call GET "/api/registrations/events/$E"
+check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
+register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
+AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; echo "      cancel attendee 1 -> $CODE"
+register 3; check "register attendee 3 on freed seat" 201
+AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
+echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test)"
 
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
-for i in $(seq 1 12); do register "$U4"; echo "      #$i -> $CODE $(field code) ${TIME}s"; done
+for i in $(seq 1 12); do register 4; echo "      #$i -> $CODE $(field code) ${TIME}s"; done
 call GET /api/events; echo "      gateway GET /api/events -> $CODE $(field code) instance=$(field instance)"
 
 echo "== Recovery"
 docker compose --profile app start event-service >/dev/null 2>&1
 until [ "$(docker compose --profile app ps --format '{{.Health}}' event-service)" = healthy ]; do sleep 2; done
 START=$(date +%s)
-for i in $(seq 1 30); do register "$U4"; [ "$CODE" = 201 ] && break; sleep 2; done
-check "register user 4 after recovery ($(( $(date +%s) - START ))s after healthy)" 201
+for i in $(seq 1 30); do register 4; [ "$CODE" = 201 ] && break; sleep 2; done
+check "register attendee 4 after recovery ($(( $(date +%s) - START ))s after healthy)" 201
 
 # The gateway discovers the restarted instance on its own schedule (Eureka fetch and load balancer cache).
 START=$(date +%s)
@@ -153,7 +164,7 @@ check "gateway routes event-service again ($(( $(date +%s) - START ))s)" 200
 
 echo "== No seat leaked"
 SEATS=$(field availableSeats)
-[ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, users 3 and 4 confirmed)"; } \
+[ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, attendees 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
 
 echo "== Result: $PASS passed, $FAIL failed"

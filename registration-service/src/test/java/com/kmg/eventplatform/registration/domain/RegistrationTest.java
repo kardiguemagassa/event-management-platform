@@ -41,6 +41,15 @@ class RegistrationTest {
     }
 
     @Test
+    void registrationBelongsToItsAttendeeOnly() {
+        Registration registration = Registration.confirm(id, eventId, userId, NOW);
+
+        assertThat(registration.belongsTo(userId)).isTrue();
+        assertThat(registration.belongsTo(UUID.randomUUID())).isFalse();
+        assertThat(registration.belongsTo(null)).isFalse();
+    }
+
+    @Test
     void cancelMarksRegistrationCancelled() {
         Registration registration = Registration.confirm(id, eventId, userId, NOW);
 

@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.registration.application;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -12,6 +13,13 @@ public interface EventCatalog {
      * @throws DownstreamUnavailableException if the answer cannot be obtained
      */
     boolean exists(UUID eventId);
+
+    /**
+     * @return the Keycloak id of the event's organizer, empty for an event created before ownership
+     * @throws EventNotFoundException         if the event does not exist
+     * @throws DownstreamUnavailableException if the answer cannot be obtained
+     */
+    Optional<UUID> organizerOf(UUID eventId);
 
     /**
      * @throws EventNotFoundException       if the event does not exist
