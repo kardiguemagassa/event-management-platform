@@ -27,6 +27,7 @@ RUN test -n "${MODULE}" || (echo "Build argument MODULE is required" && exit 1)
 # POMs first: the dependency download stays cached until a pom.xml changes.
 COPY pom.xml ./
 COPY platform-security/pom.xml platform-security/
+COPY platform-observability/pom.xml platform-observability/
 COPY discovery-server/pom.xml discovery-server/
 COPY api-gateway/pom.xml api-gateway/
 COPY user-service/pom.xml user-service/
@@ -35,8 +36,9 @@ COPY registration-service/pom.xml registration-service/
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw --batch-mode --quiet --projects "${MODULE}" --also-make dependency:go-offline
 
-# Shared library of the servlet services, built with them by --also-make (unused by the others).
+# Shared libraries, built with the services that use them by --also-make (ignored by the others).
 COPY platform-security/src platform-security/src
+COPY platform-observability/src platform-observability/src
 COPY ${MODULE}/src ${MODULE}/src
 # Declared after the dependency download: a new version does not invalidate that cached layer.
 ARG REVISION=0.0.0-SNAPSHOT

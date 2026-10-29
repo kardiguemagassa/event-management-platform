@@ -64,6 +64,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Distributed tracing (OpenTelemetry), shared setup -->
+        <dependency>
+            <groupId>com.kmg.eventplatform</groupId>
+            <artifactId>platform-observability</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

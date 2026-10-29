@@ -42,9 +42,11 @@ refresh_token() {
 
 # call METHOD PATH [JSON] -> sets CODE, TIME, BODY
 # Authenticated as the test user by default; AUTH=none for an anonymous call, AUTH=<token> for a given token.
+# TRACEPARENT=<W3C trace context> starts the call in a given trace (distributed tracing check).
 call() {
   local args=(-s -w $'\n%{http_code} %{time_total}' -X "$1" "$G$2")
   [ $# -ge 3 ] && args+=(-H 'Content-Type: application/json' -d "$3")
+  [ -n "${TRACEPARENT:-}" ] && args+=(-H "traceparent: $TRACEPARENT")
   case "${AUTH:-user}" in
     user) refresh_token; args+=(-H "Authorization: Bearer $TOKEN") ;;
     none) ;;
@@ -181,6 +183,23 @@ echo "== No seat leaked"
 SEATS=$(field availableSeats)
 [ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, attendees 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
+
+# One request through gateway, registration-service and event-service (organizer lookup with the service
+# account): started in a known trace, which must reach Tempo with the spans of the three services.
+echo "== Distributed tracing (OpenTelemetry, Grafana Tempo)"
+TRACE_ID=$(openssl rand -hex 16)
+TRACEPARENT="00-$TRACE_ID-$(openssl rand -hex 8)-01" call GET "/api/registrations/events/$E"
+echo "      traced request -> $CODE, trace $TRACE_ID"
+complete() { [[ "$TRACE" == *api-gateway* && "$TRACE" == *registration-service* && "$TRACE" == *event-service* ]]; }
+# Spans are exported in batches and indexed by Tempo within seconds.
+for i in $(seq 1 30); do
+  TRACE=$(curl -s "http://127.0.0.1:3200/api/traces/$TRACE_ID"); complete && break; sleep 2
+done
+if complete; then
+  PASS=$((PASS+1)); echo "PASS  one trace across api-gateway, registration-service and event-service"
+else
+  FAIL=$((FAIL+1)); echo "FAIL  trace $TRACE_ID incomplete in Tempo: ${TRACE:0:300}"
+fi
 
 echo "== Right to erasure"
 AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204
