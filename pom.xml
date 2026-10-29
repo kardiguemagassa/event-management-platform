@@ -20,6 +20,7 @@
 
     <modules>
         <module>platform-security</module>
+        <module>platform-observability</module>
         <module>discovery-server</module>
         <module>api-gateway</module>
         <module>user-service</module>
@@ -54,6 +55,11 @@
             <dependency>
                 <groupId>com.kmg.eventplatform</groupId>
                 <artifactId>platform-security</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kmg.eventplatform</groupId>
+                <artifactId>platform-observability</artifactId>
                 <version>${revision}</version>
             </dependency>
             <dependency>

@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: api-gateway
+  config:
+    # Local settings when started from the IDE (sampling probability), like the other services.
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
   security:
     oauth2:
       resourceserver:
@@ -122,6 +127,20 @@ management:
     health:
       probes:
         enabled: true
+  # Traces over OTLP (HTTP) to the OpenTelemetry collector: Grafana Tempo in development (compose service otel-lgtm).
+  tracing:
+    sampling:
+      # 10 % unless told otherwise (production); compose and .env.example set 100 % for development.
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
 
 gateway:
   # One breaker per route, all sharing these settings; every routing error counts as a failure.
