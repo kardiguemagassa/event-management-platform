@@ -39,6 +39,8 @@
         <java.version>21</java.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
         <springdoc.version>3.2.0</springdoc.version>
+        <!-- SQL spans (JDBC observations); not managed by Spring Boot -->
+        <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
         <!-- Base JVM arguments for tests; coverage agents (JaCoCo) are added to it later -->
         <argLine></argLine>
     </properties>
@@ -61,6 +63,11 @@
                 <groupId>com.kmg.eventplatform</groupId>
                 <artifactId>platform-observability</artifactId>
                 <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.ttddyy.observation</groupId>
+                <artifactId>datasource-micrometer-spring-boot</artifactId>
+                <version>${datasource-micrometer.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.kmg.eventplatform</groupId>

@@ -19,6 +19,8 @@ GitHub Actions.
 | `registration-service` | Registers the authenticated user to an event, reserving a seat in `event-service` with its own service account |
 | `keycloak` | Identity provider: sign-up and login, roles, access tokens (realm `event-platform`) |
 | `platform-security` | Shared library (not a service): resource server setup of the servlet services, test token helpers |
+| `platform-observability` | Shared library (not a service): OpenTelemetry tracing without the noise, trace id in error responses |
+| `otel-lgtm` | Observability backend for development: OpenTelemetry collector, Tempo (traces), Prometheus (metrics), Loki, Grafana |
 
 ## Architecture
 
@@ -50,8 +52,9 @@ flowchart LR
     gateway & users & events & registrations -.->|"register, discover"| eureka
 ```
 
-Each database sits on a private network shared with its own service only. Only the gateway (8080), Keycloak (8180)
-and Eureka (8761) publish a port, bound to `127.0.0.1`.
+Each database sits on a private network shared with its own service only. Only the gateway (8080), Keycloak (8180),
+Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200) publish a port, bound to
+`127.0.0.1`. Every service sends its traces and metrics to the collector over OTLP (not drawn).
 
 ## Tech stack
 
@@ -62,6 +65,7 @@ and Eureka (8761) publish a port, bound to `127.0.0.1`.
 | Persistence | PostgreSQL 18, Spring Data JPA (Hibernate 7), Flyway |
 | API | REST, RFC 9457 problem details, OpenAPI 3 (springdoc), Bean Validation |
 | Security | Keycloak 26 (OpenID Connect), Spring Security 7: OAuth2 resource server (JWT, RS256) and OAuth2 client (client credentials) |
+| Observability | OpenTelemetry (Spring Boot starter, Micrometer Tracing), W3C trace context, OTLP; Grafana, Tempo, Prometheus, Loki (`grafana/otel-lgtm`) in development |
 | Tests | JUnit 5, AssertJ, Mockito, Testcontainers, JaCoCo |
 | Delivery | Docker (multi-stage, multi-platform), Docker Compose, GitHub Actions, Trivy, Dependabot |
 
@@ -86,6 +90,9 @@ and Eureka (8761) publish a port, bound to `127.0.0.1`.
 | Roles for actions, ownership for objects | `ORGANIZER` may change events, but only their own (403); objects of others that are private do not exist for the caller (404) |
 | Client credentials for service-to-service calls | `registration-service` reserves seats with its own identity (`SEAT_MANAGER`), not the user's; the token is cached and renewed |
 | Shared `platform-security` library, imported explicitly | One implementation of token validation, role mapping and 401/403 problems; each service keeps its own access rules |
+| OpenTelemetry through Spring Boot's starter, no Java agent | Vendor-neutral standard (OTLP): the backend can become Datadog, Dynatrace or Elastic without code change; nothing to add to the images |
+| Noise dropped before export | Health probes, Eureka heartbeats and Spring Security filter spans would bury the business traces at 100 % sampling |
+| Trace id in every problem response | The id a client reports leads straight to the trace and to the matching log lines |
 
 ## Security
 
@@ -114,6 +121,24 @@ the Keycloak admin console.
 Clients: `event-platform-web` (public, Authorization Code with PKCE, for the future front-end) and
 `registration-service` (confidential, client credentials, its secret comes from `.env`). The access tokens carry the
 audience `event-platform-api`, checked by every service.
+
+## Observability
+
+Each request gets a trace, propagated with the W3C `traceparent` header from the gateway to the services
+(load-balanced `RestClient` included) and exported over OTLP. In development, everything goes to `grafana/otel-lgtm`:
+
+| URL | Purpose |
+|---|---|
+| `http://localhost:3000` | Grafana (`admin` / `admin`): **Explore**, data source **Tempo**, search by service or paste a trace id |
+| `http://localhost:3200/api/traces/<traceId>` | Tempo API, used by the end-to-end test |
+
+- **Spans**: gateway, services, calls between services, and one span per SQL query (`datasource-micrometer`, query text
+  without parameter values). Health probes, Eureka calls and Spring Security internals are filtered out.
+- **Logs**: every line carries `[traceId-spanId]`.
+- **Errors**: every problem answered by a service carries `traceId`, for example
+  `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
+- **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
+- **Metrics**: exported over OTLP to Prometheus as well (dashboards on the roadmap).
 
 ## API
 
@@ -152,7 +177,7 @@ a change of that file, recreate its volume (`docker volume rm event-platform_key
 
 ```bash
 docker compose --profile app up -d --build
-docker compose --profile app ps          # wait until the 10 containers are (healthy)
+docker compose --profile app ps          # wait until the 11 containers are (healthy)
 ```
 
 | URL                                     | Purpose                                            |
@@ -161,13 +186,14 @@ docker compose --profile app ps          # wait until the 10 containers are (hea
 | `http://localhost:8080/swagger-ui.html` | Swagger UI of all services (Select a definition)   |
 | `http://localhost:8761`                 | Eureka dashboard                                   |
 | `http://localhost:8180/admin`           | Keycloak admin console (account from `.env`)       |
+| `http://localhost:3000`                 | Grafana: traces (Tempo), metrics, logs             |
 
 Published ports are bound to `127.0.0.1` only. The services publish no port: they are reachable through the gateway.
 
 ### Option 2: databases in Docker, services from the IDE
 
 ```bash
-docker compose up -d                     # databases (ports 5433, 5434, 5435) and Keycloak (8180)
+docker compose up -d                     # databases (5433, 5434, 5435), Keycloak (8180), otel-lgtm (3000, 4318)
 ```
 
 Then start `discovery-server` first, followed by the other services. The aggregated Swagger UI works here too
@@ -190,7 +216,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (27 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (30 checks):
 
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
@@ -198,7 +224,9 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (27 c
   attendee cancelling a registration (`404`);
 - business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation;
 - resilience: `event-service` outage (fast `503` once the circuit is open, gateway fallback), recovery after restart,
-  and no seat leaked.
+  and no seat leaked;
+- tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
+  `event-service` and its SQL query, and an error response carries the id of its trace.
 
 ### Docker setup at a glance
 
@@ -242,6 +270,7 @@ coverage can only go up:
 | Module | Lines | Branches |
 |---|---|---|
 | `platform-security` | 90 % | 80 % |
+| `platform-observability` | 90 % | 80 % |
 | `api-gateway` | 96 % | 63 % |
 | `user-service` | 98 % | 84 % |
 | `event-service` | 98 % | 84 % |
@@ -287,6 +316,12 @@ pull request would change `main` directly and require merging `main` back into `
 - **Swagger UI cannot authenticate yet**: the bearer scheme is not declared in the OpenAPI documents, so "Try it out"
   only works on public routes.
 - **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
+- **`otel-lgtm` is a development backend**: one container, no persistence, default Grafana account. Production would
+  run a collector and the backends separately (or send OTLP to a vendor).
+- **Errors raised by the gateway itself** (its 401 and its fallback `503`) do not carry the trace id yet; the gateway
+  logs do.
+- **Calls to Keycloak are not traced**: Spring Security fetches tokens and signing keys with its own HTTP clients.
+- **Incoming `traceparent` headers are trusted** at the edge; a public deployment would restart traces at the gateway.
 - **Client-side discovery**: after a restart, callers may get `503` for a few seconds, until Eureka and the load
   balancer caches catch up (short intervals in the `docker` profile; production defaults are longer).
 - **Swagger UI is always enabled**: it should be disabled in production (`springdoc.swagger-ui.enabled=false`).
@@ -297,7 +332,8 @@ pull request would change `main` directly and require merging `main` back into `
 - **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
   cookie, token relay to the services), so that no token is ever stored in the browser.
 - **Swagger UI login**: OAuth2 security scheme in the OpenAPI documents, PKCE login from the Swagger UI.
-- **Observability**: OpenTelemetry traces across the gateway and the services (Grafana Tempo or Jaeger), metrics.
+- **Observability**: Grafana dashboards on the exported metrics (latency, errors, circuit breaker states), logs
+  shipped to Loki, trace id in the gateway's own errors.
 - **Reliability**: transactional outbox and messaging for the registration saga.
 - **Frontend**: Angular application served by nginx, proxying `/api` to the gateway (same origin, no CORS), with a
   TypeScript client generated from the OpenAPI specifications and login through the gateway (BFF).

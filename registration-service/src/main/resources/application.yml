@@ -119,3 +119,9 @@ registration:
       permitted-number-of-calls-in-half-open-state: 3
       # A half-open circuit that cannot conclude goes back to open after this delay, instead of waiting forever.
       max-wait-duration-in-half-open-state: 10s
+
+# SQL spans: queries only (no connection or result-set spans), never the parameter values (personal data).
+jdbc:
+  includes: query
+  datasource-proxy:
+    include-parameter-values: false
