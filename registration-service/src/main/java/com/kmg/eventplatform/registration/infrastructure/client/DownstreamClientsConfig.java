@@ -102,10 +102,14 @@ class DownstreamClientsConfig {
         return new ResilientUserDirectory(new RestUserDirectory(client), resilience);
     }
 
+    /** Calls to event-service carry the service account token (capacity routes need SEAT_MANAGER). */
     @Bean
     EventCatalog eventCatalog(@LoadBalanced RestClient.Builder loadBalanced, DownstreamClientsProperties properties,
-                              DownstreamResilience resilience) {
-        RestClient client = loadBalanced.clone().baseUrl(properties.eventServiceUrl()).build();
+                              DownstreamResilience resilience, ServiceAccountTokenInterceptor serviceAccount) {
+        RestClient client = loadBalanced.clone()
+                .baseUrl(properties.eventServiceUrl())
+                .requestInterceptor(serviceAccount)
+                .build();
         return new ResilientEventCatalog(new RestEventCatalog(client), resilience);
     }
 }

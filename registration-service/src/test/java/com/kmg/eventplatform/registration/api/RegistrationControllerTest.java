@@ -7,19 +7,25 @@ import com.kmg.eventplatform.registration.application.RegistrationService;
 import com.kmg.eventplatform.registration.application.UserNotFoundException;
 import com.kmg.eventplatform.registration.domain.Registration;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
+import com.kmg.eventplatform.registration.infrastructure.security.SecurityConfig;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatcher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,7 +37,10 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -39,12 +48,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(RegistrationController.class)
+@Import(SecurityConfig.class)
 class RegistrationControllerTest {
 
     private static final Instant NOW = Instant.parse("2026-10-27T10:00:00Z");
 
     @Autowired
+    private WebApplicationContext context;
+
+    /** With the security filter chain and no credentials. */
+    @Autowired
+    private MockMvc anonymous;
+
+    /** Every request carries a valid access token: these tests are about the API contract. */
     private MockMvc mockMvc;
+
+    /** Tokens are built by jwt() below: no decoding, no Keycloak. */
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
 
     @MockitoBean
     private RegistrationService service;
@@ -52,6 +73,24 @@ class RegistrationControllerTest {
     private final UUID eventId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
     private final Registration registration = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+
+    @BeforeEach
+    void authenticateEveryRequest() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .apply(springSecurity())
+                .defaultRequest(get("/").with(jwt()))
+                .build();
+    }
+
+    @Test
+    void anonymousCallIsAnUnauthenticatedProblem() throws Exception {
+        anonymous.perform(get("/api/registrations/{id}", registration.getId()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", "Bearer"))
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        verifyNoInteractions(service);
+    }
 
     @Test
     void registerReturnsCreatedWithLocation() throws Exception {

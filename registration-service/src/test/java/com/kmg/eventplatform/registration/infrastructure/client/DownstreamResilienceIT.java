@@ -5,6 +5,7 @@ import com.kmg.eventplatform.registration.application.DownstreamUnavailableExcep
 import com.kmg.eventplatform.registration.application.EventCatalog;
 import com.kmg.eventplatform.registration.application.EventFullException;
 import com.kmg.eventplatform.registration.application.UserDirectory;
+import com.kmg.eventplatform.security.test.TestTokens;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,6 +42,7 @@ class DownstreamResilienceIT {
     static void downstreams(DynamicPropertyRegistry registry) {
         registry.add("spring.cloud.discovery.client.simple.instances.user-service[0].uri", USER_SERVICE::url);
         registry.add("spring.cloud.discovery.client.simple.instances.event-service[0].uri", EVENT_SERVICE::url);
+        registry.add("spring.security.oauth2.client.provider.keycloak.token-uri", TestTokens::tokenUri);
     }
 
     @AfterAll
@@ -57,6 +61,21 @@ class DownstreamResilienceIT {
     void resetDownstreams() {
         USER_SERVICE.reset();
         EVENT_SERVICE.reset();
+    }
+
+    @Test
+    void eventServiceCallsCarryTheServiceAccountToken() {
+        int tokenRequestsBefore = TestTokens.tokenRequests();
+
+        events.exists(UUID.randomUUID());
+        events.exists(UUID.randomUUID());
+
+        assertThat(EVENT_SERVICE.authorizations()).hasSize(2).allSatisfy(authorization -> {
+            assertThat(authorization).startsWith("Bearer ");
+            assertThat(payload(authorization)).contains(TestTokens.SERVICE_ACCOUNT.toString(), "SEAT_MANAGER");
+        });
+        // Cached by the authorized client manager: at most one token request, none if an earlier test got it.
+        assertThat(TestTokens.tokenRequests() - tokenRequestsBefore).isLessThanOrEqualTo(1);
     }
 
     @Test
@@ -103,10 +122,19 @@ class DownstreamResilienceIT {
                     .isInstanceOf(DownstreamUnavailableException.class);
         }
         assertThat(USER_SERVICE.requests()).isEqualTo(8);
+        // Only event-service calls carry the service account token (checked here: any successful call to
+        // user-service in another test would stay in the breaker window and open the circuit earlier).
+        assertThat(USER_SERVICE.authorizations()).containsOnly("");
 
         assertThatThrownBy(() -> users.exists(UUID.randomUUID()))
                 .isInstanceOf(DownstreamUnavailableException.class)
                 .hasMessageContaining("circuit breaker is open");
         assertThat(USER_SERVICE.requests()).isEqualTo(8);
+    }
+
+    /** Claims of a JWT, as text. */
+    private static String payload(String authorization) {
+        String[] parts = authorization.substring("Bearer ".length()).split("\\.");
+        return new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
     }
 }
