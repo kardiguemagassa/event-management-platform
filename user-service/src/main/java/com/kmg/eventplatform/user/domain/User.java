@@ -11,8 +11,9 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * A platform user. Instances are always valid: creation goes through {@link #register}
- * and changes through {@link #changeDetails}, which enforce the invariants.
+ * The application profile of a platform user. Identity (credentials, e-mail, roles) lives in Keycloak: the
+ * profile has the same id ({@code sub}) and a copy of the e-mail. Instances are always valid: creation goes
+ * through {@link #register} and changes through {@link #changeDetails}, which enforce the invariants.
  */
 @Entity
 @Table(name = "users")
@@ -45,9 +46,11 @@ public class User {
         this.createdAt = createdAt;
     }
 
-    public static User register(String fullName, String email, Instant now) {
+    /** @param id the Keycloak id ({@code sub}) of the user */
+    public static User register(UUID id, String fullName, String email, Instant now) {
+        Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(now, "now must not be null");
-        return new User(UUID.randomUUID(), requireFullName(fullName), normalizeEmail(email), now);
+        return new User(id, requireFullName(fullName), normalizeEmail(email), now);
     }
 
     public void changeDetails(String fullName, String email) {

@@ -15,11 +15,12 @@ public record EventResponse(
         int reservedSeats,
         int availableSeats,
         EventStatus status,
-        Instant createdAt) {
+        Instant createdAt,
+        UUID organizerId) {
 
     static EventResponse from(Event event) {
         return new EventResponse(event.getId(), event.getTitle(), event.getDescription(), event.getLocation(),
                 event.getStartAt(), event.getCapacity(), event.getReservedSeats(), event.availableSeats(),
-                event.getStatus(), event.getCreatedAt());
+                event.getStatus(), event.getCreatedAt(), event.getOrganizerId());
     }
 }

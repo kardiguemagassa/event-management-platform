@@ -4,26 +4,31 @@
 [![Release](https://img.shields.io/github/v/release/kardiguemagassa/event-management-platform)](https://github.com/kardiguemagassa/event-management-platform/releases)
 [![Docker Hub](https://img.shields.io/docker/v/kardigue/event-platform-api-gateway?sort=semver&label=docker%20hub)](https://hub.docker.com/u/kardigue)
 
-Microservices platform to manage users, events and registrations, with seat reservation across services.
-Built with Spring Boot 4 and Spring Cloud, containerised with Docker, tested and delivered by GitHub Actions.
+Microservices platform to manage events and registrations, with seat reservation across services, secured with
+Keycloak (OAuth2, JWT). Built with Spring Boot 4 and Spring Cloud, containerised with Docker, tested and delivered by
+GitHub Actions.
 
 ## Overview
 
 | Service | Responsibility |
 |---|---|
-| `api-gateway` | Single entry point: routing, circuit breakers with fallback, one Swagger UI for every service |
+| `api-gateway` | Single entry point: token validation, routing, circuit breakers with fallback, one Swagger UI for every service |
 | `discovery-server` | Eureka registry: services find each other by name |
-| `user-service` | Users, with a unique e-mail address |
-| `event-service` | Events, their lifecycle (published, cancelled) and capacity, with idempotent seat reservation |
-| `registration-service` | Registers a user to an event by orchestrating `user-service` and `event-service` |
+| `user-service` | Application profiles of the users (`/api/users/me`), keyed by their Keycloak id |
+| `event-service` | Events, their lifecycle (draft, published, cancelled), their organizer and capacity, with idempotent seat reservation |
+| `registration-service` | Registers the authenticated user to an event, reserving a seat in `event-service` with its own service account |
+| `keycloak` | Identity provider: sign-up and login, roles, access tokens (realm `event-platform`) |
+| `platform-security` | Shared library (not a service): resource server setup of the servlet services, test token helpers |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|":8080"| gateway
+    client([Client]) -->|"login :8180"| keycloak
+    client -->|"Bearer token :8080"| gateway
 
     subgraph platform ["Docker network: default"]
+        keycloak["keycloak<br/>realm event-platform"]
         gateway["api-gateway<br/>Spring Cloud Gateway"]
         eureka["discovery-server<br/>Eureka"]
         users[user-service]
@@ -31,10 +36,13 @@ flowchart LR
         registrations[registration-service]
     end
 
-    gateway --> users & events & registrations
-    registrations -->|"user exists?"| users
-    registrations -->|"event exists? reserve / release seat"| events
+    gateway -->|"token relayed"| users & events & registrations
+    registrations -->|"service account token:<br/>event, organizer, reserve / release seat"| events
+    registrations -.->|"client credentials"| keycloak
+    gateway -.->|"signing keys (JWKS)"| keycloak
+    users & events & registrations -.-> keycloak
 
+    keycloak --- keycloakdb[(keycloak_db)]
     users --- userdb[(user_db)]
     events --- eventdb[(event_db)]
     registrations --- registrationdb[(registration_db)]
@@ -42,8 +50,8 @@ flowchart LR
     gateway & users & events & registrations -.->|"register, discover"| eureka
 ```
 
-Each database sits on a private network shared with its own service only. Only the gateway (8080) and Eureka (8761)
-publish a port, bound to `127.0.0.1`.
+Each database sits on a private network shared with its own service only. Only the gateway (8080), Keycloak (8180)
+and Eureka (8761) publish a port, bound to `127.0.0.1`.
 
 ## Tech stack
 
@@ -53,6 +61,7 @@ publish a port, bound to `127.0.0.1`.
 | Microservices | Spring Cloud 2025.1: Gateway, Netflix Eureka, LoadBalancer, CircuitBreaker (Resilience4j) |
 | Persistence | PostgreSQL 18, Spring Data JPA (Hibernate 7), Flyway |
 | API | REST, RFC 9457 problem details, OpenAPI 3 (springdoc), Bean Validation |
+| Security | Keycloak 26 (OpenID Connect), Spring Security 7: OAuth2 resource server (JWT, RS256) and OAuth2 client (client credentials) |
 | Tests | JUnit 5, AssertJ, Mockito, Testcontainers, JaCoCo |
 | Delivery | Docker (multi-stage, multi-platform), Docker Compose, GitHub Actions, Trivy, Dependabot |
 
@@ -61,7 +70,7 @@ publish a port, bound to `127.0.0.1`.
 | Decision | Why |
 |---|---|
 | One database per service, each on a private network | A service owns its data; no other service can reach its database, not even through the network |
-| Synchronous saga in `registration-service`, with compensation | User check, event check, seat reservation, then the registration is saved; if saving fails, the seat is released. No distributed transaction, and no HTTP call inside a database transaction |
+| Synchronous saga in `registration-service`, with compensation | Event check, seat reservation, then the registration is saved; if saving fails, the seat is released. No distributed transaction, and no HTTP call inside a database transaction |
 | Idempotent seat reservation (reservation id = registration id) | A retried reserve or release never counts twice |
 | Partial unique index on (event, user) for confirmed registrations | Duplicates are rejected by the database itself, even under concurrent requests (covered by a concurrency test) |
 | Retry, then circuit breaker, per downstream service | Fast transient failures are retried once; a failing service is cut off and answered with `503` in milliseconds. Business answers (`404`, `409`) are not failures |
@@ -70,6 +79,41 @@ publish a port, bound to `127.0.0.1`.
 | RFC 9457 problem details with a stable `code` | Clients branch on `code`, never on human-readable messages |
 | Lightweight hexagonal architecture | Domain and application code do not depend on HTTP or JPA; adapters are replaceable and tested on their own |
 | Version taken from the Git tag (CI-friendly `${revision}`) | One source of truth for image tags, jar names and `/actuator/info` |
+| Keycloak as identity provider, user-service as profile store | Credentials, e-mail and roles stay in a dedicated, standard component; the services keep only what the business needs, keyed by the token's `sub` |
+| Tokens validated at the gateway **and** in every service | Zero trust: the gateway rejects early, each service enforces its own rules and never trusts the network |
+| Keys from the internal JWK set, public issuer and audience checked | No discovery call at startup; a token from another realm or for another audience is rejected |
+| Identity taken from the token, never from the request | Closes IDOR: a registration is made for the caller, a profile is the caller's own, an event belongs to its creator |
+| Roles for actions, ownership for objects | `ORGANIZER` may change events, but only their own (403); objects of others that are private do not exist for the caller (404) |
+| Client credentials for service-to-service calls | `registration-service` reserves seats with its own identity (`SEAT_MANAGER`), not the user's; the token is cached and renewed |
+| Shared `platform-security` library, imported explicitly | One implementation of token validation, role mapping and 401/403 problems; each service keeps its own access rules |
+
+## Security
+
+Keycloak issues the access tokens (realm `event-platform`); every call to `/api` carries one as a bearer token,
+except reads of the public event catalog. Sign-up is open and gives the `ATTENDEE` role; other roles are granted in
+the Keycloak admin console.
+
+| Role | Granted to | Allows |
+|---|---|---|
+| `ATTENDEE` | every new user (default role) | registering to events, cancelling one's own registrations |
+| `ORGANIZER` | by an administrator | creating events, and changing, publishing, cancelling or deleting one's own |
+| `SEAT_MANAGER` | the `registration-service` service account only | reserving and releasing seats |
+| `ADMIN` | by an administrator | reading and deleting any user profile |
+
+| Route | Access |
+|---|---|
+| `GET /api/events`, `GET /api/events/{id}` | public; a draft is visible to its organizer only |
+| other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`) |
+| `/api/events/{id}/capacity/**` | `SEAT_MANAGER`; closed at the gateway |
+| `POST /api/registrations`, `POST /api/registrations/{id}/cancel` | `ATTENDEE`, own registrations only (others are `404`) |
+| `GET /api/registrations/me`, `GET /api/registrations/{id}` | authenticated, own registrations only |
+| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event |
+| `GET` `PUT` `DELETE /api/users/me` | authenticated, one's own profile |
+| `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN` |
+
+Clients: `event-platform-web` (public, Authorization Code with PKCE, for the future front-end) and
+`registration-service` (confidential, client credentials, its secret comes from `.env`). The access tokens carry the
+audience `event-platform-api`, checked by every service.
 
 ## API
 
@@ -78,17 +122,18 @@ Every endpoint is reached through the gateway, `http://localhost:8080`, and docu
 
 | Resource | Endpoints |
 |---|---|
-| Users | `GET` `POST` `/api/users`, `GET` `PUT` `DELETE` `/api/users/{id}` |
+| Users (profiles) | `GET` `PUT` `DELETE` `/api/users/me`, `GET /api/users`, `GET` `DELETE` `/api/users/{id}` |
 | Events | `GET` `POST` `/api/events`, `GET` `PUT` `DELETE` `/api/events/{id}`, `POST /api/events/{id}/publish`, `POST /api/events/{id}/cancel`, `POST /api/events/{id}/capacity/reserve` and `.../release` (used by `registration-service`) |
-| Registrations | `POST /api/registrations`, `GET /api/registrations/{id}`, `POST /api/registrations/{id}/cancel`, `GET /api/registrations/users/{userId}`, `GET /api/registrations/events/{eventId}` |
+| Registrations | `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/{id}`, `POST /api/registrations/{id}/cancel`, `GET /api/registrations/events/{eventId}` |
 
 Errors are RFC 9457 problem details with a stable `code` (the HTTP status of each case is listed in the Swagger UI):
 
 | Category | Codes |
 |---|---|
+| Security | `UNAUTHENTICATED` (401), `ACCESS_DENIED` (403, missing role), `NOT_EVENT_ORGANIZER` (403, not the owner) |
 | Not found | `USER_NOT_FOUND`, `EVENT_NOT_FOUND`, `REGISTRATION_NOT_FOUND` |
 | Business rules | `ALREADY_REGISTERED`, `EVENT_FULL`, `EVENT_NOT_REGISTRABLE`, `REGISTRATION_ALREADY_CANCELLED`, `EMAIL_ALREADY_USED`, `INVALID_EVENT_STATE`, `EVENT_HAS_RESERVATIONS`, `CAPACITY_BELOW_RESERVED`, `RESERVATION_ID_CONFLICT`, `CONCURRENT_MODIFICATION` |
-| Invalid request | `VALIDATION_FAILED`, `INVALID_SORT_PROPERTY`, `EVENT_START_NOT_IN_FUTURE` |
+| Invalid request | `VALIDATION_FAILED`, `INVALID_SORT_PROPERTY`, `EVENT_START_NOT_IN_FUTURE`, `EMAIL_CLAIM_MISSING` |
 | Availability | `DOWNSTREAM_UNAVAILABLE` (a dependency of `registration-service`), `SERVICE_UNAVAILABLE` and `UPSTREAM_TIMEOUT` (gateway fallback), `INTERNAL_ERROR` |
 
 ## Running locally
@@ -99,11 +144,15 @@ Prerequisites: Java 21 and Docker with Compose v2. Create your local configurati
 cp .env.example .env   # then set your own values; .env is git-ignored and must never be committed
 ```
 
+`.env` holds the database credentials, the Keycloak admin account and the secret of the `registration-service`
+client. The realm is imported from `keycloak/realm-event-platform.json` at the first start of Keycloak only: after
+a change of that file, recreate its volume (`docker volume rm event-platform_keycloak-db-data`).
+
 ### Option 1: whole platform in Docker
 
 ```bash
 docker compose --profile app up -d --build
-docker compose --profile app ps          # wait until the 8 containers are (healthy)
+docker compose --profile app ps          # wait until the 10 containers are (healthy)
 ```
 
 | URL                                     | Purpose                                            |
@@ -111,13 +160,14 @@ docker compose --profile app ps          # wait until the 8 containers are (heal
 | `http://localhost:8080`                 | API Gateway, the single entry point                |
 | `http://localhost:8080/swagger-ui.html` | Swagger UI of all services (Select a definition)   |
 | `http://localhost:8761`                 | Eureka dashboard                                   |
+| `http://localhost:8180/admin`           | Keycloak admin console (account from `.env`)       |
 
 Published ports are bound to `127.0.0.1` only. The services publish no port: they are reachable through the gateway.
 
 ### Option 2: databases in Docker, services from the IDE
 
 ```bash
-docker compose up -d                     # databases only (ports 5433, 5434, 5435)
+docker compose up -d                     # databases (ports 5433, 5434, 5435) and Keycloak (8180)
 ```
 
 Then start `discovery-server` first, followed by the other services. The aggregated Swagger UI works here too
@@ -128,15 +178,27 @@ Then start `discovery-server` first, followed by the other services. The aggrega
 > interface, so both can hold the same port and register in the same Eureka, which mixes the instances.
 > Stop one option before starting the other (`docker compose --profile app stop`).
 
+### Calling the API with a token
+
+The public client only supports the browser login flow (Authorization Code with PKCE). For calls from a terminal,
+the end-to-end script shows the whole recipe: it creates a test client with the password grant and test users
+through the Keycloak admin API, then deletes them on exit. Such a client must never exist outside development.
+
 ### End-to-end smoke test
 
 ```bash
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only: nominal registration, duplicate (`409 ALREADY_REGISTERED`),
-full event (`409 EVENT_FULL`), `event-service` outage (fast `503` once the circuit is open, gateway fallback),
-recovery after restart, and no seat leaked.
+Runs against Option 1, through the gateway only, with real Keycloak tokens (27 checks):
+
+- profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
+- security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
+  private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
+  attendee cancelling a registration (`404`);
+- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation;
+- resilience: `event-service` outage (fast `503` once the circuit is open, gateway fallback), recovery after restart,
+  and no seat leaked.
 
 ### Docker setup at a glance
 
@@ -153,7 +215,7 @@ Every merge to `main` and every `vX.Y.Z` tag publishes images for `linux/amd64` 
 Each image is scanned with Trivy (no fixable critical vulnerability) and carries an SBOM and build provenance.
 
 ```bash
-export IMAGE_NAMESPACE=kardigue IMAGE_TAG=0.2.0
+export IMAGE_NAMESPACE=kardigue IMAGE_TAG=0.3.0
 docker compose --profile app pull
 docker compose --profile app up -d --no-build
 ```
@@ -169,9 +231,9 @@ docker compose --profile app down -v     # also deletes the databases
 
 | Level | Tools | Scope |
 |---|---|---|
-| Unit | JUnit 5, AssertJ, Mockito | Domain rules, application services, HTTP adapters, the circuit breaker configuration on a real Resilience4j breaker |
-| Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services | Repositories and Flyway migrations, concurrent registrations, retry and circuit breaker, gateway routing and fallback, API docs |
-| End to end | `scripts/e2e-docker.sh` | The whole platform in Docker, through the gateway only, including an outage and the recovery of `event-service` |
+| Unit | JUnit 5, AssertJ, Mockito, Spring Security Test | Domain rules (ownership, visibility), application services, HTTP adapters and access rules, the circuit breaker configuration on a real Resilience4j breaker |
+| Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs |
+| End to end | `scripts/e2e-docker.sh` | The whole platform in Docker with a real Keycloak, through the gateway only, including an outage and the recovery of `event-service` |
 
 `./mvnw verify` runs the unit and integration tests (Docker is required for Testcontainers) and the coverage checks.
 JaCoCo measures unit and integration tests together; each module has a floor just below its measured coverage, so
@@ -179,6 +241,7 @@ coverage can only go up:
 
 | Module | Lines | Branches |
 |---|---|---|
+| `platform-security` | 90 % | 80 % |
 | `api-gateway` | 96 % | 63 % |
 | `user-service` | 98 % | 84 % |
 | `event-service` | 98 % | 84 % |
@@ -194,8 +257,8 @@ coverage can only go up:
 
 - Every action is pinned by commit SHA; workflow tokens are read-only (`contents: read`).
 - Rulesets on `dev` and `main`: changes through pull requests only, `build` and `e2e` required, no force push, no deletion.
-- CI databases use throwaway passwords generated per run; the Docker Hub token is scoped to read and write, expires,
-  and lives in the repository secrets only.
+- CI uses throwaway database passwords, Keycloak admin password and client secret generated (and masked) per run;
+  the Docker Hub token is scoped to read and write, expires, and lives in the repository secrets only.
 
 ### Release process
 
@@ -218,7 +281,12 @@ pull request would change `main` directly and require merging `main` back into `
 
 - **Saga without an outbox**: if `registration-service` stops between the seat reservation and the save of the
   registration, the seat stays reserved. A transactional outbox with a message broker would make the saga reliable.
-- **No authentication**: the API is open (see Roadmap).
+- **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
+  behind TLS, a fixed hostname and an external database for high availability.
+- **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console.
+- **Swagger UI cannot authenticate yet**: the bearer scheme is not declared in the OpenAPI documents, so "Try it out"
+  only works on public routes.
+- **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
 - **Client-side discovery**: after a restart, callers may get `503` for a few seconds, until Eureka and the load
   balancer caches catch up (short intervals in the `docker` profile; production defaults are longer).
 - **Swagger UI is always enabled**: it should be disabled in production (`springdoc.swagger-ui.enabled=false`).
@@ -226,8 +294,10 @@ pull request would change `main` directly and require merging `main` back into `
 
 ## Roadmap
 
-- **Security**: OAuth2 resource server at the gateway with Keycloak (JWT), token relayed to the services.
+- **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
+  cookie, token relay to the services), so that no token is ever stored in the browser.
+- **Swagger UI login**: OAuth2 security scheme in the OpenAPI documents, PKCE login from the Swagger UI.
 - **Observability**: OpenTelemetry traces across the gateway and the services (Grafana Tempo or Jaeger), metrics.
 - **Reliability**: transactional outbox and messaging for the registration saga.
 - **Frontend**: Angular application served by nginx, proxying `/api` to the gateway (same origin, no CORS), with a
-  TypeScript client generated from the OpenAPI specifications.
+  TypeScript client generated from the OpenAPI specifications and login through the gateway (BFF).

@@ -11,13 +11,17 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,14 +41,15 @@ class RegistrationServiceTest {
 
     private final UUID eventId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
+    private final UUID organizerId = UUID.randomUUID();
     private final FakeEventCatalog events = new FakeEventCatalog();
     private RegistrationService service;
 
     @BeforeEach
     void setUp() {
         events.events.add(eventId);
-        UserDirectory users = Set.of(userId)::contains;
-        service = new RegistrationService(repository, users, events, Clock.fixed(NOW, ZoneOffset.UTC));
+        events.organizers.put(eventId, organizerId);
+        service = new RegistrationService(repository, events, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -56,15 +61,6 @@ class RegistrationServiceTest {
         assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
         assertThat(registration.getCreatedAt()).isEqualTo(NOW);
         assertThat(events.heldSeats).containsEntry(registration.getId(), eventId);
-    }
-
-    @Test
-    void unknownUserIsRejectedBeforeAnySideEffect() {
-        assertThatThrownBy(() -> service.register(eventId, UUID.randomUUID()))
-                .isInstanceOf(UserNotFoundException.class);
-
-        assertThat(events.heldSeats).isEmpty();
-        verify(repository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -159,7 +155,7 @@ class RegistrationServiceTest {
         when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
         when(repository.saveAndFlush(registration)).thenReturn(registration);
 
-        Registration cancelled = service.cancel(registration.getId());
+        Registration cancelled = service.cancel(registration.getId(), userId);
 
         assertThat(cancelled.getStatus()).isEqualTo(RegistrationStatus.CANCELLED);
         assertThat(cancelled.getCancelledAt()).isEqualTo(NOW);
@@ -172,7 +168,7 @@ class RegistrationServiceTest {
         when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
         events.releaseFailure = new DownstreamUnavailableException("event-service", "down");
 
-        assertThatThrownBy(() -> service.cancel(registration.getId()))
+        assertThatThrownBy(() -> service.cancel(registration.getId(), userId))
                 .isInstanceOf(DownstreamUnavailableException.class);
 
         assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
@@ -185,7 +181,7 @@ class RegistrationServiceTest {
         registration.cancel(NOW);
         when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
 
-        assertThatThrownBy(() -> service.cancel(registration.getId()))
+        assertThatThrownBy(() -> service.cancel(registration.getId(), userId))
                 .isInstanceOf(RegistrationAlreadyCancelledException.class);
 
         assertThat(events.releaseCalls).isZero();
@@ -196,7 +192,64 @@ class RegistrationServiceTest {
         UUID unknown = UUID.randomUUID();
         when(repository.findById(unknown)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.cancel(unknown)).isInstanceOf(RegistrationNotFoundException.class);
+        assertThatThrownBy(() -> service.cancel(unknown, userId)).isInstanceOf(RegistrationNotFoundException.class);
+    }
+
+    @Test
+    void registrationOfAnotherUserDoesNotExistForTheCaller() {
+        Registration registration = confirmedRegistration();
+        when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
+        UUID otherUser = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.get(registration.getId(), otherUser))
+                .isInstanceOf(RegistrationNotFoundException.class);
+        assertThatThrownBy(() -> service.cancel(registration.getId(), otherUser))
+                .isInstanceOf(RegistrationNotFoundException.class);
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(events.releaseCalls).isZero();
+    }
+
+    @Test
+    void attendeeReadsOwnRegistration() {
+        Registration registration = confirmedRegistration();
+        when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
+
+        assertThat(service.get(registration.getId(), userId)).isSameAs(registration);
+    }
+
+    @Test
+    void organizerListsTheRegistrationsOfTheirEvent() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
+        when(repository.findByEventId(eventId, pageable)).thenReturn(page);
+
+        assertThat(service.findByEvent(eventId, organizerId, pageable)).isSameAs(page);
+    }
+
+    @Test
+    void otherUsersCannotListTheRegistrationsOfAnEvent() {
+        assertThatThrownBy(() -> service.findByEvent(eventId, userId, PageRequest.of(0, 20)))
+                .isInstanceOf(NotEventOrganizerException.class)
+                .hasMessageContaining(eventId.toString());
+        verify(repository, never()).findByEventId(any(), any());
+    }
+
+    @Test
+    void registrationsOfAnEventCreatedBeforeOwnershipAreListedByNobody() {
+        events.organizers.remove(eventId);
+
+        assertThatThrownBy(() -> service.findByEvent(eventId, organizerId, PageRequest.of(0, 20)))
+                .isInstanceOf(NotEventOrganizerException.class);
+    }
+
+    @Test
+    void attendeeListsOwnRegistrations() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
+        when(repository.findByUserId(userId, pageable)).thenReturn(page);
+
+        assertThat(service.findByUser(userId, pageable)).isSameAs(page);
     }
 
     private Registration confirmedRegistration() {

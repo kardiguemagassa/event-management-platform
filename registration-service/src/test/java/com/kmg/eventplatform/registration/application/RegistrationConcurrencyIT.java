@@ -44,16 +44,12 @@ class RegistrationConcurrencyIT {
     private RegistrationRepository repository;
 
     @MockitoBean
-    private UserDirectory users;
-
-    @MockitoBean
     private EventCatalog events;
 
     private final Set<UUID> heldSeats = ConcurrentHashMap.newKeySet();
 
     @BeforeEach
     void stubDownstreams() {
-        when(users.exists(any())).thenReturn(true);
         when(events.exists(any())).thenReturn(true);
         doAnswer(invocation -> heldSeats.add(invocation.getArgument(1))).when(events).reserveSeat(any(), any());
         doAnswer(invocation -> heldSeats.remove(invocation.getArgument(1))).when(events).releaseSeat(any(), any());

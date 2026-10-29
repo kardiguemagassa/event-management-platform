@@ -11,6 +11,14 @@ spring:
       enabled: true
   application:
     name: event-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Keys from the JWK set URI (internal Keycloak URL in containers); issuer and audience still checked.
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/event-platform}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/event-platform/protocol/openid-connect/certs}
+          audiences: event-platform-api
   config:
     import:
       - optional:file:.env[.properties]

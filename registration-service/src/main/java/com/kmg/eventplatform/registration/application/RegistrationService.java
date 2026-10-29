@@ -16,7 +16,8 @@ import java.time.Clock;
 import java.util.UUID;
 
 /**
- * Orchestrates user-service and event-service around the local registration.
+ * Registers the authenticated user to an event of event-service. The attendee is the caller identified by
+ * the access token (never an id sent in the request), and a registration is private to its attendee.
  * <p>
  * Deliberately not {@code @Transactional}: no database connection is held during remote calls.
  * Each repository write runs in its own short transaction, and remote side effects are undone by compensation.
@@ -30,22 +31,17 @@ public class RegistrationService {
     static final String ACTIVE_REGISTRATION_INDEX = "uq_registrations_active_event_user";
 
     private final RegistrationRepository repository;
-    private final UserDirectory users;
     private final EventCatalog events;
     private final Clock clock;
 
-    public RegistrationService(RegistrationRepository repository, UserDirectory users, EventCatalog events,
-                               Clock clock) {
+    public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock) {
         this.repository = repository;
-        this.users = users;
         this.events = events;
         this.clock = clock;
     }
 
+    /** @param userId the authenticated attendee, from the access token */
     public Registration register(UUID eventId, UUID userId) {
-        if (!users.exists(userId)) {
-            throw new UserNotFoundException(userId);
-        }
         if (!events.exists(eventId)) {
             throw new EventNotFoundException(eventId);
         }
@@ -73,8 +69,8 @@ public class RegistrationService {
      * The seat is released first: if event-service is down, the registration stays CONFIRMED
      * and the client can retry safely, since releasing is idempotent.
      */
-    public Registration cancel(UUID registrationId) {
-        Registration registration = get(registrationId);
+    public Registration cancel(UUID registrationId, UUID userId) {
+        Registration registration = get(registrationId, userId);
         if (registration.isCancelled()) {
             throw new RegistrationAlreadyCancelledException(registrationId);
         }
@@ -83,12 +79,22 @@ public class RegistrationService {
         return repository.saveAndFlush(registration);
     }
 
-    public Registration get(UUID registrationId) {
+    /**
+     * The registrations of other users do not exist for the caller: 404, like an unknown id, so that
+     * registration ids cannot be probed.
+     */
+    public Registration get(UUID registrationId, UUID userId) {
         return repository.findById(registrationId)
+                .filter(registration -> registration.belongsTo(userId))
                 .orElseThrow(() -> new RegistrationNotFoundException(registrationId));
     }
 
-    public Page<Registration> findByEvent(UUID eventId, Pageable pageable) {
+    /** Who registered to an event: its organizer only (the event itself is public, hence 403 rather than 404). */
+    public Page<Registration> findByEvent(UUID eventId, UUID organizerId, Pageable pageable) {
+        boolean organizer = events.organizerOf(eventId).map(organizerId::equals).orElse(false);
+        if (!organizer) {
+            throw new NotEventOrganizerException(eventId);
+        }
         return repository.findByEventId(eventId, pageable);
     }
 

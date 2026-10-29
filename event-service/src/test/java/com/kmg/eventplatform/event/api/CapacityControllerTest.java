@@ -3,7 +3,9 @@ package com.kmg.eventplatform.event.api;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -15,16 +17,22 @@ import com.kmg.eventplatform.event.domain.EventFullException;
 import com.kmg.eventplatform.event.domain.EventNotRegistrableException;
 import com.kmg.eventplatform.event.domain.EventStatus;
 import com.kmg.eventplatform.event.domain.ReservationConflictException;
+import com.kmg.eventplatform.event.infrastructure.security.SecurityConfig;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 @WebMvcTest(CapacityController.class)
+@Import(SecurityConfig.class)
 class CapacityControllerTest {
 
     private static final UUID EVENT = UUID.randomUUID();
@@ -36,14 +44,48 @@ class CapacityControllerTest {
     @MockitoBean
     private CapacityService service;
 
-    private ResultActions call(String action, String body) throws Exception {
+    /** Tokens are built by jwt() below: no decoding, no Keycloak. */
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
+
+    /** The service account of registration-service, the only caller allowed to reserve seats. */
+    private static JwtRequestPostProcessor seatManager() {
+        return jwt().authorities(new SimpleGrantedAuthority("ROLE_SEAT_MANAGER"));
+    }
+
+    private ResultActions call(String action, String body, JwtRequestPostProcessor caller) throws Exception {
         return mockMvc.perform(post("/api/events/{id}/capacity/{action}", EVENT, action)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(body));
+                .content(body)
+                .with(caller));
+    }
+
+    private ResultActions call(String action, String body) throws Exception {
+        return call(action, body, seatManager());
     }
 
     private ResultActions call(String action) throws Exception {
         return call(action, "{\"reservationId\": \"" + RESERVATION + "\"}");
+    }
+
+    @Test
+    void organizerCannotReserveSeats() throws Exception {
+        call("reserve", "{\"reservationId\": \"" + RESERVATION + "\"}",
+                jwt().authorities(new SimpleGrantedAuthority("ROLE_ORGANIZER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void anonymousCallerCannotReleaseSeats() throws Exception {
+        mockMvc.perform(post("/api/events/{id}/capacity/release", EVENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reservationId\": \"" + RESERVATION + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(service);
     }
 
     @Test

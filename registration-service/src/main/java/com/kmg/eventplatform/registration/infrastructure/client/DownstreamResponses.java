@@ -3,6 +3,7 @@ package com.kmg.eventplatform.registration.infrastructure.client;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
 import org.springframework.web.client.RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse;
 import org.springframework.web.client.RestClientException;
 
@@ -26,12 +27,15 @@ final class DownstreamResponses {
      * I/O errors and timeouts (RestClientException), and Spring Cloud LoadBalancer finding no instance at all
      * (IllegalStateException "No instances available for ...").
      * Fast, retryable failures are marked transient, a missing instance as {@link NoInstanceAvailableException}.
+     * No access token for the call (Keycloak unreachable or refusing the service account) is not retried.
      */
     static <T> T call(String service, Supplier<T> call) {
         try {
             return call.get();
         } catch (RestClientException | IllegalStateException noAnswer) {
             throw new DownstreamUnavailableException(service, classify(noAnswer));
+        } catch (OAuth2AuthorizationException noToken) {
+            throw new DownstreamUnavailableException(service, noToken);
         }
     }
 

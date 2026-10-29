@@ -12,12 +12,11 @@ import org.springframework.validation.annotation.Validated;
 import java.time.Duration;
 
 /**
- * Base URLs use Eureka service ids (http://user-service), resolved by Spring Cloud LoadBalancer.
+ * Base URLs use Eureka service ids (http://event-service), resolved by Spring Cloud LoadBalancer.
  */
 @Validated
 @ConfigurationProperties("registration.clients")
 public record DownstreamClientsProperties(
-        @NotBlank String userServiceUrl,
         @NotBlank String eventServiceUrl,
         @NotNull Duration connectTimeout,
         @NotNull Duration readTimeout,

@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +38,7 @@ class GatewayRoutingIT {
     private static final List<String> receivedPaths = new CopyOnWriteArrayList<>();
     private static final AtomicReference<String> forwardedHost = new AtomicReference<>();
     private static final AtomicReference<String> forwardedProto = new AtomicReference<>();
+    private static final AtomicReference<String> authorization = new AtomicReference<>();
     private static final HttpServer backend = startBackend();
 
     @Value("${local.server.port}")
@@ -48,6 +50,7 @@ class GatewayRoutingIT {
         registry.add("EVENT_SERVICE_URI", () -> backendUri);
         registry.add("USER_SERVICE_URI", () -> backendUri);
         registry.add("REGISTRATION_SERVICE_URI", () -> backendUri);
+        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestTokens::jwkSetUri);
     }
 
     @AfterAll
@@ -60,13 +63,13 @@ class GatewayRoutingIT {
         receivedPaths.clear();
         forwardedHost.set(null);
         forwardedProto.set(null);
+        authorization.set(null);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
             "/api/events",
             "/api/events/42",
-            "/api/events/42/capacity/reserve",
             "/api/users",
             "/api/users/7",
             "/api/registrations/events/3"
@@ -87,9 +90,24 @@ class GatewayRoutingIT {
     }
 
     @Test
+    void relaysTheAccessTokenToTheBackend() {
+        String token = TestTokens.valid();
+
+        RestClient.create().get()
+                .uri("http://localhost:" + port + "/api/users/7")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .retrieve()
+                .toBodilessEntity();
+
+        // The services validate the same token again (zero trust).
+        assertThat(authorization.get()).isEqualTo("Bearer " + token);
+    }
+
+    @Test
     void overridesSpoofedForwardedHeadersSentByClient() {
         RestClient.create().get()
                 .uri("http://localhost:" + port + "/api/users/7")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + TestTokens.valid())
                 .header("X-Forwarded-Host", "evil.example")
                 .header("X-Forwarded-Proto", "https")
                 .retrieve()
@@ -99,20 +117,28 @@ class GatewayRoutingIT {
         assertThat(forwardedProto.get()).isEqualTo("http");
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"/unknown", "/users/7", "/events"})
-    void unroutedPathReturnsNotFoundWithoutCallingBackend(String path) {
-        ResponseEntity<Void> response = get(path);
+    @Test
+    void unroutedApiPathReturnsNotFoundWithoutCallingBackend() {
+        ResponseEntity<Void> response = get("/api/unknown");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(receivedPaths).isEmpty();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/unknown", "/users/7", "/events"})
+    void pathOutsideTheApiIsDeniedWithoutCallingBackend(String path) {
+        ResponseEntity<Void> response = get(path);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(receivedPaths).isEmpty();
+    }
+
     @Test
     void notFoundRequestsAreLogged(CapturedOutput output) {
-        get("/unknown");
+        get("/api/unknown");
 
-        assertThat(output).contains("GET /unknown -> 404");
+        assertThat(output).contains("GET /api/unknown -> 404");
     }
 
     @Test
@@ -123,9 +149,11 @@ class GatewayRoutingIT {
         assertThat(output).doesNotContain("/actuator/health ->");
     }
 
+    /** Authenticated GET: these tests are about routing, security has its own test class. */
     private ResponseEntity<Void> get(String path) {
         return RestClient.create().get()
                 .uri("http://localhost:" + port + path)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + TestTokens.valid())
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (request, response) -> { })
                 .toBodilessEntity();
@@ -138,6 +166,7 @@ class GatewayRoutingIT {
                 receivedPaths.add(exchange.getRequestURI().getRawPath());
                 forwardedHost.set(exchange.getRequestHeaders().getFirst("X-Forwarded-Host"));
                 forwardedProto.set(exchange.getRequestHeaders().getFirst("X-Forwarded-Proto"));
+                authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, body.length);

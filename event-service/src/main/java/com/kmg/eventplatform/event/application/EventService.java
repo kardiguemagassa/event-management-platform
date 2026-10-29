@@ -27,44 +27,81 @@ public class EventService {
     }
 
     @Transactional
-    public Event create(EventDetails details) {
-        return repository.save(Event.create(details, clock.instant()));
+    public Event create(EventDetails details, UUID organizerId) {
+        return repository.save(Event.create(details, organizerId, clock.instant()));
     }
 
     public Event getById(UUID id) {
         return repository.findById(id).orElseThrow(() -> new EventNotFoundException(id));
     }
 
-    /** @param status optional filter, {@code null} for all events */
-    public Page<Event> list(EventStatus status, Pageable pageable) {
-        return status == null ? repository.findAll(pageable) : repository.findByStatus(status, pageable);
+    /**
+     * The drafts of other organizers do not exist for the viewer: 404, like an unknown id.
+     *
+     * @param viewerId the caller, {@code null} when anonymous
+     */
+    public Event getVisible(UUID id, UUID viewerId) {
+        Event event = getById(id);
+        if (!event.isVisibleTo(viewerId)) {
+            throw new EventNotFoundException(id);
+        }
+        return event;
+    }
+
+    /**
+     * Events visible to the viewer: every published or cancelled event, plus the viewer's own drafts.
+     *
+     * @param status   optional filter, {@code null} for all visible events
+     * @param viewerId the caller, {@code null} when anonymous
+     */
+    public Page<Event> list(EventStatus status, UUID viewerId, Pageable pageable) {
+        if (status == null) {
+            return viewerId == null
+                    ? repository.findByStatusNot(EventStatus.DRAFT, pageable)
+                    : repository.findVisibleTo(viewerId, EventStatus.DRAFT, pageable);
+        }
+        if (status == EventStatus.DRAFT) {
+            return viewerId == null
+                    ? Page.empty(pageable)
+                    : repository.findByStatusAndOrganizerId(EventStatus.DRAFT, viewerId, pageable);
+        }
+        return repository.findByStatus(status, pageable);
     }
 
     @Transactional
-    public Event update(UUID id, EventDetails details) {
-        Event event = getById(id);
+    public Event update(UUID id, EventDetails details, UUID organizerId) {
+        Event event = getOwned(id, organizerId);
         event.update(details, clock.instant());
         return event;
     }
 
     @Transactional
-    public Event publish(UUID id) {
-        Event event = getById(id);
+    public Event publish(UUID id, UUID organizerId) {
+        Event event = getOwned(id, organizerId);
         event.publish(clock.instant());
         return event;
     }
 
     @Transactional
-    public Event cancel(UUID id) {
-        Event event = getById(id);
+    public Event cancel(UUID id, UUID organizerId) {
+        Event event = getOwned(id, organizerId);
         event.cancel();
         return event;
     }
 
     @Transactional
-    public void delete(UUID id) {
-        Event event = getById(id);
+    public void delete(UUID id, UUID organizerId) {
+        Event event = getOwned(id, organizerId);
         event.ensureDeletable();
         repository.delete(event);
+    }
+
+    /** Object-level authorization: the role allows the action, ownership allows it on this event. */
+    private Event getOwned(UUID id, UUID organizerId) {
+        Event event = getVisible(id, organizerId);
+        if (!event.isOrganizedBy(organizerId)) {
+            throw new NotEventOrganizerException(id);
+        }
+        return event;
     }
 }

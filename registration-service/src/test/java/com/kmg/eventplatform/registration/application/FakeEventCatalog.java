@@ -3,6 +3,7 @@ package com.kmg.eventplatform.registration.application;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -12,6 +13,8 @@ import java.util.UUID;
 class FakeEventCatalog implements EventCatalog {
 
     final Set<UUID> events = new HashSet<>();
+    /** Organizer of each event; an event missing here was created before ownership. */
+    final Map<UUID, UUID> organizers = new HashMap<>();
     final Map<UUID, UUID> heldSeats = new HashMap<>();
     RuntimeException reserveRejection;
     boolean reserveTimesOutAfterCommit;
@@ -21,6 +24,14 @@ class FakeEventCatalog implements EventCatalog {
     @Override
     public boolean exists(UUID eventId) {
         return events.contains(eventId);
+    }
+
+    @Override
+    public Optional<UUID> organizerOf(UUID eventId) {
+        if (!events.contains(eventId)) {
+            throw new EventNotFoundException(eventId);
+        }
+        return Optional.ofNullable(organizers.get(eventId));
     }
 
     @Override

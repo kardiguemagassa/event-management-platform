@@ -19,6 +19,7 @@
     <description>Event management microservices platform</description>
 
     <modules>
+        <module>platform-security</module>
         <module>discovery-server</module>
         <module>api-gateway</module>
         <module>user-service</module>
@@ -49,6 +50,17 @@
                 <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.kmg.eventplatform</groupId>
+                <artifactId>platform-security</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kmg.eventplatform</groupId>
+                <artifactId>platform-security</artifactId>
+                <version>${revision}</version>
+                <type>test-jar</type>
             </dependency>
             <dependency>
                 <groupId>org.springdoc</groupId>
