@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,13 +17,14 @@ class EventTest {
 
     private static final Instant NOW = Instant.parse("2026-10-26T10:00:00Z");
     private static final Instant NEXT_MONTH = NOW.plus(Duration.ofDays(30));
+    private static final UUID ORGANIZER = UUID.randomUUID();
 
     private static EventDetails details(int capacity) {
         return new EventDetails("Spring Meetup", "Talks about Spring Boot 4", "Paris", NEXT_MONTH, capacity);
     }
 
     private static Event draft() {
-        return Event.create(details(50), NOW);
+        return Event.create(details(50), ORGANIZER, NOW);
     }
 
     private static void reserveSeats(Event event, int seats) {
@@ -71,16 +73,64 @@ class EventTest {
             assertThat(event.getReservedSeats()).isZero();
             assertThat(event.availableSeats()).isEqualTo(50);
             assertThat(event.getCreatedAt()).isEqualTo(NOW);
+            assertThat(event.getOrganizerId()).isEqualTo(ORGANIZER);
+        }
+
+        @Test
+        void requiresAnOrganizer() {
+            assertThatThrownBy(() -> Event.create(details(50), null, NOW))
+                    .isInstanceOf(NullPointerException.class);
         }
 
         @Test
         void rejectsStartInThePast() {
             EventDetails past = new EventDetails("Meetup", null, "Paris", NOW.minusSeconds(1), 10);
 
-            assertThatThrownBy(() -> Event.create(past, NOW))
+            assertThatThrownBy(() -> Event.create(past, ORGANIZER, NOW))
                     .isInstanceOf(EventStartNotInFutureException.class)
                     .extracting(e -> ((EventRuleException) e).code())
                     .isEqualTo("EVENT_START_NOT_IN_FUTURE");
+        }
+    }
+
+    @Nested
+    class Ownership {
+
+        @Test
+        void onlyItsOrganizerOrganizesAnEvent() {
+            Event event = draft();
+
+            assertThat(event.isOrganizedBy(ORGANIZER)).isTrue();
+            assertThat(event.isOrganizedBy(UUID.randomUUID())).isFalse();
+            assertThat(event.isOrganizedBy(null)).isFalse();
+        }
+
+        @Test
+        void eventCreatedBeforeOwnershipHasNoOrganizer() {
+            Event legacy = draft();
+            ReflectionTestUtils.setField(legacy, "organizerId", null);
+
+            assertThat(legacy.isOrganizedBy(ORGANIZER)).isFalse();
+            assertThat(legacy.isOrganizedBy(null)).isFalse();
+        }
+
+        @Test
+        void draftIsVisibleToItsOrganizerOnly() {
+            Event event = draft();
+
+            assertThat(event.isVisibleTo(ORGANIZER)).isTrue();
+            assertThat(event.isVisibleTo(UUID.randomUUID())).isFalse();
+            assertThat(event.isVisibleTo(null)).isFalse();
+        }
+
+        @Test
+        void publishedAndCancelledEventsArePublic() {
+            Event event = draft();
+            event.publish(NOW);
+            assertThat(event.isVisibleTo(null)).isTrue();
+
+            event.cancel();
+            assertThat(event.isVisibleTo(UUID.randomUUID())).isTrue();
         }
     }
 

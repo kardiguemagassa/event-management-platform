@@ -10,7 +10,10 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -22,6 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.kmg.eventplatform.event.application.EventNotFoundException;
 import com.kmg.eventplatform.event.application.EventService;
+import com.kmg.eventplatform.event.application.NotEventOrganizerException;
 import com.kmg.eventplatform.event.domain.CapacityBelowReservedException;
 import com.kmg.eventplatform.event.domain.Event;
 import com.kmg.eventplatform.event.domain.EventDetails;
@@ -29,23 +33,34 @@ import com.kmg.eventplatform.event.domain.EventHasReservationsException;
 import com.kmg.eventplatform.event.domain.EventStartNotInFutureException;
 import com.kmg.eventplatform.event.domain.EventStatus;
 import com.kmg.eventplatform.event.domain.InvalidEventStateException;
+import com.kmg.eventplatform.event.infrastructure.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 @WebMvcTest(EventController.class)
+@Import(SecurityConfig.class)
 class EventControllerTest {
+
+    private static final UUID ORGANIZER = UUID.randomUUID();
 
     private static final Instant START = Instant.parse("2099-06-01T18:00:00Z");
     private static final EventDetails DETAILS = new EventDetails("Spring Meetup", "Talks", "Paris", START, 50);
@@ -55,19 +70,88 @@ class EventControllerTest {
             """;
 
     @Autowired
+    private WebApplicationContext context;
+
+    /** With the security filter chain and no credentials. */
+    @Autowired
+    private MockMvc anonymous;
+
+    /** Every request is made by ORGANIZER, with the ORGANIZER role: these tests are about the API contract. */
     private MockMvc mockMvc;
 
     @MockitoBean
     private EventService service;
 
+    /** Tokens are built by jwt() below: no decoding, no Keycloak. */
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
+
+    @BeforeEach
+    void authenticateEveryRequestAsTheOrganizer() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .apply(springSecurity())
+                .defaultRequest(get("/").with(caller(ORGANIZER, "ORGANIZER")))
+                .build();
+    }
+
+    private static JwtRequestPostProcessor caller(UUID userId, String... roles) {
+        SimpleGrantedAuthority[] authorities = new SimpleGrantedAuthority[roles.length];
+        for (int i = 0; i < roles.length; i++) {
+            authorities[i] = new SimpleGrantedAuthority("ROLE_" + roles[i]);
+        }
+        return jwt().jwt(token -> token.subject(userId.toString())).authorities(authorities);
+    }
+
     private static Event event() {
-        return Event.create(DETAILS, Instant.now());
+        return Event.create(DETAILS, ORGANIZER, Instant.now());
+    }
+
+    @Test
+    void anonymousCallerCanReadAPublicEvent() throws Exception {
+        Event event = event();
+        event.publish(Instant.now());
+        when(service.getVisible(event.getId(), null)).thenReturn(event);
+
+        anonymous.perform(get("/api/events/{id}", event.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.organizerId").value(ORGANIZER.toString()));
+    }
+
+    @Test
+    void anonymousCallerCannotCreateAnEvent() throws Exception {
+        anonymous.perform(post("/api/events").contentType(MediaType.APPLICATION_JSON).content(VALID_JSON))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void attendeeCannotCreateAnEvent() throws Exception {
+        anonymous.perform(post("/api/events").contentType(MediaType.APPLICATION_JSON).content(VALID_JSON)
+                        .with(caller(UUID.randomUUID(), "ATTENDEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void anotherOrganizerCannotChangeTheEvent() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(service.cancel(id, ORGANIZER)).thenThrow(new NotEventOrganizerException(id));
+
+        mockMvc.perform(post("/api/events/{id}/cancel", id))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("NOT_EVENT_ORGANIZER"))
+                .andExpect(jsonPath("$.eventId").value(id.toString()));
     }
 
     @Test
     void createReturns201WithLocationAndBody() throws Exception {
         Event event = event();
-        when(service.create(DETAILS)).thenReturn(event);
+        when(service.create(DETAILS, ORGANIZER)).thenReturn(event);
 
         mockMvc.perform(post("/api/events").contentType(MediaType.APPLICATION_JSON).content(VALID_JSON))
                 .andExpect(status().isCreated())
@@ -92,7 +176,7 @@ class EventControllerTest {
                 .andExpect(jsonPath("$.errors.startAt").exists())
                 .andExpect(jsonPath("$.errors.capacity").exists());
 
-        verify(service, never()).create(any());
+        verify(service, never()).create(any(), any());
     }
 
     @Test
@@ -106,7 +190,7 @@ class EventControllerTest {
 
     @Test
     void domainStartRuleIsReturnedAs400() throws Exception {
-        when(service.create(any())).thenThrow(new EventStartNotInFutureException(null, START));
+        when(service.create(any(), any())).thenThrow(new EventStartNotInFutureException(null, START));
 
         mockMvc.perform(post("/api/events").contentType(MediaType.APPLICATION_JSON).content(VALID_JSON))
                 .andExpect(status().isBadRequest())
@@ -117,7 +201,7 @@ class EventControllerTest {
     @Test
     void getReturnsEvent() throws Exception {
         Event event = event();
-        when(service.getById(event.getId())).thenReturn(event);
+        when(service.getVisible(event.getId(), ORGANIZER)).thenReturn(event);
 
         mockMvc.perform(get("/api/events/{id}", event.getId()))
                 .andExpect(status().isOk())
@@ -128,7 +212,7 @@ class EventControllerTest {
     @Test
     void getReturns404WhenEventDoesNotExist() throws Exception {
         UUID id = UUID.randomUUID();
-        when(service.getById(id)).thenThrow(new EventNotFoundException(id));
+        when(service.getVisible(id, ORGANIZER)).thenThrow(new EventNotFoundException(id));
 
         mockMvc.perform(get("/api/events/{id}", id))
                 .andExpect(status().isNotFound())
@@ -139,8 +223,8 @@ class EventControllerTest {
 
     @Test
     void listDefaultsToAllEventsSortedByStartAtAscending() throws Exception {
-        when(service.list(isNull(), any())).thenAnswer(invocation ->
-                new PageImpl<>(List.of(event()), invocation.getArgument(1), 1));
+        when(service.list(isNull(), eq(ORGANIZER), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(event()), invocation.getArgument(2), 1));
 
         mockMvc.perform(get("/api/events"))
                 .andExpect(status().isOk())
@@ -148,20 +232,20 @@ class EventControllerTest {
                 .andExpect(jsonPath("$.size").value(20));
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(service).list(isNull(), pageable.capture());
+        verify(service).list(isNull(), eq(ORGANIZER), pageable.capture());
         assertThat(pageable.getValue().getSort().getOrderFor("startAt").getDirection())
                 .isEqualTo(Sort.Direction.ASC);
     }
 
     @Test
     void listFiltersByStatus() throws Exception {
-        when(service.list(eq(EventStatus.PUBLISHED), any())).thenAnswer(invocation ->
-                new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+        when(service.list(eq(EventStatus.PUBLISHED), eq(ORGANIZER), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(), invocation.getArgument(2), 0));
 
         mockMvc.perform(get("/api/events").param("status", "PUBLISHED"))
                 .andExpect(status().isOk());
 
-        verify(service).list(eq(EventStatus.PUBLISHED), any());
+        verify(service).list(eq(EventStatus.PUBLISHED), eq(ORGANIZER), any());
     }
 
     @Test
@@ -170,7 +254,7 @@ class EventControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 
-        verify(service, never()).list(any(), any());
+        verify(service, never()).list(any(), any(), any());
     }
 
     @Test
@@ -179,13 +263,13 @@ class EventControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SORT_PROPERTY"));
 
-        verify(service, never()).list(any(), any());
+        verify(service, never()).list(any(), any(), any());
     }
 
     @Test
     void updateReturns409WhenCapacityBelowReservedSeats() throws Exception {
         UUID id = UUID.randomUUID();
-        when(service.update(eq(id), any())).thenThrow(new CapacityBelowReservedException(id, 50, 60));
+        when(service.update(eq(id), any(), eq(ORGANIZER))).thenThrow(new CapacityBelowReservedException(id, 50, 60));
 
         mockMvc.perform(put("/api/events/{id}", id).contentType(MediaType.APPLICATION_JSON).content(VALID_JSON))
                 .andExpect(status().isConflict())
@@ -196,7 +280,7 @@ class EventControllerTest {
     @Test
     void updateReturns409OnConcurrentModification() throws Exception {
         UUID id = UUID.randomUUID();
-        when(service.update(eq(id), any())).thenThrow(new OptimisticLockingFailureException("stale"));
+        when(service.update(eq(id), any(), eq(ORGANIZER))).thenThrow(new OptimisticLockingFailureException("stale"));
 
         mockMvc.perform(put("/api/events/{id}", id).contentType(MediaType.APPLICATION_JSON).content(VALID_JSON))
                 .andExpect(status().isConflict())
@@ -207,7 +291,7 @@ class EventControllerTest {
     void publishReturnsPublishedEvent() throws Exception {
         Event event = event();
         event.publish(Instant.now());
-        when(service.publish(event.getId())).thenReturn(event);
+        when(service.publish(event.getId(), ORGANIZER)).thenReturn(event);
 
         mockMvc.perform(post("/api/events/{id}/publish", event.getId()))
                 .andExpect(status().isOk())
@@ -217,7 +301,7 @@ class EventControllerTest {
     @Test
     void publishReturns409WhenEventIsCancelled() throws Exception {
         UUID id = UUID.randomUUID();
-        when(service.publish(id)).thenThrow(new InvalidEventStateException(id, EventStatus.CANCELLED, "publish"));
+        when(service.publish(id, ORGANIZER)).thenThrow(new InvalidEventStateException(id, EventStatus.CANCELLED, "publish"));
 
         mockMvc.perform(post("/api/events/{id}/publish", id))
                 .andExpect(status().isConflict())
@@ -229,7 +313,7 @@ class EventControllerTest {
     void cancelReturnsCancelledEvent() throws Exception {
         Event event = event();
         event.cancel();
-        when(service.cancel(event.getId())).thenReturn(event);
+        when(service.cancel(event.getId(), ORGANIZER)).thenReturn(event);
 
         mockMvc.perform(post("/api/events/{id}/cancel", event.getId()))
                 .andExpect(status().isOk())
@@ -243,13 +327,13 @@ class EventControllerTest {
         mockMvc.perform(delete("/api/events/{id}", id))
                 .andExpect(status().isNoContent());
 
-        verify(service).delete(id);
+        verify(service).delete(id, ORGANIZER);
     }
 
     @Test
     void deleteReturns409WhenEventHasReservations() throws Exception {
         UUID id = UUID.randomUUID();
-        doThrow(new EventHasReservationsException(id, 3)).when(service).delete(id);
+        doThrow(new EventHasReservationsException(id, 3)).when(service).delete(id, ORGANIZER);
 
         mockMvc.perform(delete("/api/events/{id}", id))
                 .andExpect(status().isConflict())
@@ -259,7 +343,7 @@ class EventControllerTest {
     @Test
     void unexpectedErrorReturns500WithoutLeakingDetails() throws Exception {
         UUID id = UUID.randomUUID();
-        when(service.getById(id)).thenThrow(new IllegalStateException("db password is hunter2"));
+        when(service.getVisible(id, ORGANIZER)).thenThrow(new IllegalStateException("db password is hunter2"));
 
         mockMvc.perform(get("/api/events/{id}", id))
                 .andExpect(status().isInternalServerError())

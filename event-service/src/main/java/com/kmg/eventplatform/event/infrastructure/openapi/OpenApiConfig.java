@@ -38,6 +38,8 @@ class OpenApiConfig {
                         .addResponses("BadRequest", problemResponse(
                                 "Invalid request (validation, malformed JSON, start not in future, invalid sort)"))
                         .addResponses("NotFound", problemResponse("Event not found"))
+                        .addResponses("Forbidden", problemResponse(
+                                "Not the organizer of this event (NOT_EVENT_ORGANIZER)"))
                         .addResponses("Conflict", problemResponse(
                                 "Business conflict (invalid state, capacity below reserved, has reservations, "
                                         + "concurrent modification)")));

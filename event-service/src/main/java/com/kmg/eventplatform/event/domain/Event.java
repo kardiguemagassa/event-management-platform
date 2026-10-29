@@ -51,6 +51,10 @@ public class Event {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** Keycloak id ({@code sub}) of the user who created the event; null for events created before ownership. */
+    @Column(name = "organizer_id", updatable = false)
+    private UUID organizerId;
+
     @Version
     private Long version;
 
@@ -58,15 +62,27 @@ public class Event {
         // required by JPA
     }
 
-    public static Event create(EventDetails details, Instant now) {
+    public static Event create(EventDetails details, UUID organizerId, Instant now) {
         Objects.requireNonNull(details, "details must not be null");
+        Objects.requireNonNull(organizerId, "organizerId must not be null");
         requireFutureStart(null, details.startAt(), now);
         Event event = new Event();
         event.id = UUID.randomUUID();
         event.applyDetails(details);
         event.status = EventStatus.DRAFT;
         event.createdAt = now;
+        event.organizerId = organizerId;
         return event;
+    }
+
+    /** Only its organizer may change an event. */
+    public boolean isOrganizedBy(UUID userId) {
+        return organizerId != null && organizerId.equals(userId);
+    }
+
+    /** A draft is private to its organizer; published and cancelled events are public. */
+    public boolean isVisibleTo(UUID viewerId) {
+        return status != EventStatus.DRAFT || isOrganizedBy(viewerId);
     }
 
     public void update(EventDetails details, Instant now) {
@@ -163,6 +179,10 @@ public class Event {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public UUID getOrganizerId() {
+        return organizerId;
     }
 
     public Long getVersion() {

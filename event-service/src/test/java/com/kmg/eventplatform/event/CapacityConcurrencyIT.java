@@ -2,6 +2,7 @@ package com.kmg.eventplatform.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kmg.eventplatform.security.test.TestTokens;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -35,11 +38,22 @@ class CapacityConcurrencyIT {
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT =
             new ParameterizedTypeReference<>() { };
 
+    /** The organizer creates the events; registration-service's service account reserves the seats. */
+    private static final String ORGANIZER = TestTokens.forUser(UUID.randomUUID(), "ORGANIZER");
+    private static final String SEAT_MANAGER = TestTokens.forUser(TestTokens.SERVICE_ACCOUNT, "SEAT_MANAGER");
+
+    @DynamicPropertySource
+    static void tokenValidation(DynamicPropertyRegistry registry) {
+        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestTokens::jwkSetUri);
+    }
+
     @Value("${local.server.port}")
     private int port;
 
     private ResponseEntity<Map<String, Object>> send(HttpMethod method, String path, Object body) {
-        RestClient.RequestBodySpec request = RestClient.create("http://localhost:" + port).method(method).uri(path);
+        String token = path.contains("/capacity/") ? SEAT_MANAGER : ORGANIZER;
+        RestClient.RequestBodySpec request = RestClient.create("http://localhost:" + port).method(method).uri(path)
+                .header("Authorization", "Bearer " + token);
         if (body != null) {
             request.contentType(MediaType.APPLICATION_JSON).body(body);
         }
