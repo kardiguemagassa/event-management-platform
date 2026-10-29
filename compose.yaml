@@ -18,6 +18,9 @@ x-spring-service: &spring-service
 x-spring-environment: &spring-environment
   SPRING_PROFILES_ACTIVE: docker
   EUREKA_URL: http://discovery-server:8761/eureka
+  # Token validation: keys from Keycloak on the compose network, issuer as written in tokens (public URL).
+  KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/event-platform/protocol/openid-connect/certs
+  KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-8180}/realms/event-platform
 
 x-healthcheck-timing: &healthcheck-timing
   interval: 5s

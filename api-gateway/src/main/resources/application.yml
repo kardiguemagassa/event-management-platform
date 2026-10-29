@@ -4,6 +4,15 @@ server:
 spring:
   application:
     name: api-gateway
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Keys are fetched from the JWK set URI (internal Keycloak URL in containers, no discovery call at
+          # startup) while every token must still carry the public issuer and the platform audience.
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/event-platform}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/event-platform/protocol/openid-connect/certs}
+          audiences: event-platform-api
   cloud:
     circuitbreaker:
       resilience4j:
