@@ -48,7 +48,7 @@ class CapacityServiceTest {
 
     private Event existingEvent(boolean published) {
         Event event = Event.create(
-                new EventDetails("Meetup", null, "Paris", NOW.plus(Duration.ofDays(30)), 10), NOW);
+                new EventDetails("Meetup", null, "Paris", NOW.plus(Duration.ofDays(30)), 10), UUID.randomUUID(), NOW);
         if (published) {
             event.publish(NOW);
         }

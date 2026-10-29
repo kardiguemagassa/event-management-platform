@@ -1,6 +1,7 @@
 package com.kmg.eventplatform.event.api;
 
 import com.kmg.eventplatform.event.application.EventNotFoundException;
+import com.kmg.eventplatform.event.application.NotEventOrganizerException;
 import com.kmg.eventplatform.event.domain.CapacityBelowReservedException;
 import com.kmg.eventplatform.event.domain.EventFullException;
 import com.kmg.eventplatform.event.domain.EventHasReservationsException;
@@ -40,6 +41,14 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(EventNotFoundException.class)
     ProblemDetail handleEventNotFound(EventNotFoundException ex) {
         ProblemDetail problem = problem(HttpStatus.NOT_FOUND, "Event not found", ex.getMessage(), "EVENT_NOT_FOUND");
+        problem.setProperty("eventId", ex.getEventId());
+        return problem;
+    }
+
+    @ExceptionHandler(NotEventOrganizerException.class)
+    ProblemDetail handleNotEventOrganizer(NotEventOrganizerException ex) {
+        ProblemDetail problem = problem(HttpStatus.FORBIDDEN, "Not the event organizer", ex.getMessage(),
+                "NOT_EVENT_ORGANIZER");
         problem.setProperty("eventId", ex.getEventId());
         return problem;
     }

@@ -9,6 +9,7 @@ import jakarta.persistence.PersistenceException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -22,6 +23,7 @@ class EventRepositoryTest {
 
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MICROS);
     private static final Instant NEXT_MONTH = NOW.plus(Duration.ofDays(30));
+    private static final UUID ORGANIZER = UUID.randomUUID();
 
     @Autowired
     private EventRepository repository;
@@ -30,8 +32,12 @@ class EventRepositoryTest {
     private EntityManager entityManager;
 
     private Event saveEvent(int capacity) {
+        return saveEvent(capacity, ORGANIZER);
+    }
+
+    private Event saveEvent(int capacity, UUID organizer) {
         EventDetails details = new EventDetails("Spring Meetup", "Talks", "Paris", NEXT_MONTH, capacity);
-        return repository.saveAndFlush(Event.create(details, NOW));
+        return repository.saveAndFlush(Event.create(details, organizer, NOW));
     }
 
     private void setReservedSeatsInDatabase(Event event, int seats) {
@@ -54,6 +60,29 @@ class EventRepositoryTest {
         assertThat(reloaded.getReservedSeats()).isZero();
         assertThat(reloaded.getStatus()).isEqualTo(EventStatus.DRAFT);
         assertThat(reloaded.getVersion()).isZero();
+        assertThat(reloaded.getOrganizerId()).isEqualTo(ORGANIZER);
+    }
+
+    @Test
+    void visibleEventsExcludeTheDraftsOfOtherOrganizers() {
+        UUID viewer = UUID.randomUUID();
+        Event ownDraft = saveEvent(10, viewer);
+        Event otherDraft = saveEvent(10, UUID.randomUUID());
+        Event published = saveEvent(10, UUID.randomUUID());
+        published.publish(NOW);
+        repository.saveAndFlush(published);
+
+        var visible = repository.findVisibleTo(viewer, EventStatus.DRAFT, PageRequest.of(0, 100, Sort.by("startAt")));
+        var anonymous = repository.findByStatusNot(EventStatus.DRAFT, PageRequest.of(0, 100));
+        var ownDrafts = repository.findByStatusAndOrganizerId(EventStatus.DRAFT, viewer, PageRequest.of(0, 100));
+
+        assertThat(visible.getContent()).extracting(Event::getId)
+                .contains(ownDraft.getId(), published.getId())
+                .doesNotContain(otherDraft.getId());
+        assertThat(anonymous.getContent()).extracting(Event::getId)
+                .contains(published.getId())
+                .doesNotContain(ownDraft.getId(), otherDraft.getId());
+        assertThat(ownDrafts.getContent()).extracting(Event::getId).containsExactly(ownDraft.getId());
     }
 
     @Test

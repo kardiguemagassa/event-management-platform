@@ -28,7 +28,8 @@ admin() {
 }
 
 E2E_CLIENT=e2e-tests
-E2E_USER="e2e.$TS@example.com"
+E2E_USER="e2e.$TS@example.com"        # organizer and attendee: drives the whole scenario
+E2E_OTHER="e2e.other.$TS@example.com" # another organizer: must not change the events of the first one
 E2E_PASSWORD=$(openssl rand -hex 16)
 TOKEN=""; TOKEN_AT=0
 # Access tokens live 5 minutes and a run can last longer: renew after 4.
@@ -65,10 +66,20 @@ register() { call POST /api/registrations "{\"eventId\":\"$E\",\"userId\":\"$1\"
 
 echo "== Test identity (Keycloak admin API)"
 cleanup() {
-  local id
-  id=$(first_id "$(admin GET "/users?email=$E2E_USER&exact=true")"); [ -n "$id" ] && admin DELETE "/users/$id" >/dev/null
+  local id user
+  for user in "$E2E_USER" "$E2E_OTHER"; do
+    id=$(first_id "$(admin GET "/users?email=$user&exact=true")"); [ -n "$id" ] && admin DELETE "/users/$id" >/dev/null
+  done
   id=$(first_id "$(admin GET "/clients?clientId=$E2E_CLIENT")"); [ -n "$id" ] && admin DELETE "/clients/$id" >/dev/null
   return 0
+}
+# create_user EMAIL -> organizer (ORGANIZER on top of the default ATTENDEE role), password $E2E_PASSWORD
+create_user() {
+  admin POST /users "{\"username\":\"$1\",\"email\":\"$1\",\"emailVerified\":true,\"enabled\":true,
+    \"firstName\":\"E2E\",\"lastName\":\"Tester\",
+    \"credentials\":[{\"type\":\"password\",\"value\":\"$E2E_PASSWORD\",\"temporary\":false}]}" >/dev/null
+  local id; id=$(first_id "$(admin GET "/users?email=$1&exact=true")")
+  admin POST "/users/$id/role-mappings/realm" "[$(admin GET /roles/ORGANIZER)]" >/dev/null
 }
 cleanup  # a previous interrupted run may have left its client behind
 trap cleanup EXIT
@@ -77,12 +88,11 @@ admin POST /clients "{\"clientId\":\"$E2E_CLIENT\",\"publicClient\":true,\"stand
   \"directAccessGrantsEnabled\":true,\"protocolMappers\":[{\"name\":\"event-platform-api audience\",
   \"protocol\":\"openid-connect\",\"protocolMapper\":\"oidc-audience-mapper\",\"config\":{
   \"included.custom.audience\":\"event-platform-api\",\"access.token.claim\":\"true\",\"id.token.claim\":\"false\"}}]}" >/dev/null
-admin POST /users "{\"username\":\"$E2E_USER\",\"email\":\"$E2E_USER\",\"emailVerified\":true,\"enabled\":true,
-  \"firstName\":\"E2E\",\"lastName\":\"Tester\",
-  \"credentials\":[{\"type\":\"password\",\"value\":\"$E2E_PASSWORD\",\"temporary\":false}]}" >/dev/null
+create_user "$E2E_USER"
+create_user "$E2E_OTHER"
 refresh_token
 [ -n "$TOKEN" ] || { echo "FAIL  no access token for the test user"; exit 1; }
-echo "      test user and client ready"
+echo "      test users and client ready"
 
 # Healthy containers are not routable yet: the gateway must first see each service in Eureka.
 echo "== Waiting for the gateway to route every service"
@@ -102,7 +112,10 @@ for i in $(seq 1 30); do register "$U1"; [ "$CODE" = 404 ] && break; sleep 2; do
 check "registration-service reaches user-service and event-service" 404
 call POST /api/events '{"title":"Docker Day","location":"Paris","startAt":"2027-03-15T18:00:00Z","capacity":2}'
 check "create event (capacity 2)" 201; E=$(field id)
+AUTH=none call GET "/api/events/$E"; check "draft hidden from anonymous callers" 404 EVENT_NOT_FOUND
 call POST "/api/events/$E/publish"; echo "      publish -> $CODE"
+AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_OTHER" "$E2E_PASSWORD") call POST "/api/events/$E/cancel"
+check "another organizer cannot cancel the event" 403 NOT_EVENT_ORGANIZER
 
 echo "== Security at the gateway"
 AUTH=none call GET /api/users; check "anonymous call to a protected route" 401 UNAUTHENTICATED
