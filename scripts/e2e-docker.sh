@@ -123,7 +123,10 @@ for service in user-service event-service registration-service; do
   [[ "$CODE" = 200 && "$BODY" == *'"securitySchemes"'* && "$BODY" == *"/protocol/openid-connect/auth"* ]] \
     || { DOCS_OK=0; echo "      $service -> $CODE ${BODY:0:200}"; }
 done
-[ "$DOCS_OK" = 1 ] && { PASS=$((PASS+1)); echo "PASS  every API document declares the Keycloak OAuth2 scheme"; } \
+# Keycloak redirects back to the page the gateway serves: under /webjars, not /swagger-ui.
+AUTH=none call GET /v3/api-docs/swagger-config
+[[ "$BODY" == *'/webjars/swagger-ui/oauth2-redirect.html'* ]] || { DOCS_OK=0; echo "      swagger-config -> $CODE ${BODY:0:200}"; }
+[ "$DOCS_OK" = 1 ] && { PASS=$((PASS+1)); echo "PASS  every API document declares the Keycloak OAuth2 scheme, Swagger UI redirect under /webjars"; } \
                    || { FAIL=$((FAIL+1)); echo "FAIL  Keycloak OAuth2 scheme missing from an API document"; }
 
 echo "== Profiles (user-service)"

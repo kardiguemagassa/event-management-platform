@@ -60,6 +60,18 @@ class GatewayApiDocsIT {
     }
 
     @Test
+    void swaggerUiSignsInWithKeycloak() {
+        ResponseEntity<String> config = get("/v3/api-docs/swagger-config");
+        // Keycloak redirects back to a page the gateway serves and permits (under /webjars)
+        assertThat(config.getBody()).contains(
+                "\"oauth2RedirectUrl\":\"http://localhost:8080/webjars/swagger-ui/oauth2-redirect.html\"");
+        assertThat(get("/webjars/swagger-ui/oauth2-redirect.html").getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<String> initializer = get("/webjars/swagger-ui/swagger-initializer.js");
+        assertThat(initializer.getBody()).contains("event-platform-web");
+    }
+
+    @Test
     void servesSwaggerUi() {
         ResponseEntity<String> response = get("/webjars/swagger-ui/index.html");
 
