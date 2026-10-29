@@ -2,7 +2,6 @@ package com.kmg.eventplatform.registration.infrastructure.client;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventCatalog;
-import com.kmg.eventplatform.registration.application.UserDirectory;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -93,13 +92,6 @@ class DownstreamClientsConfig {
                 .jitter(settings.jitter())
                 .build();
         return new DownstreamResilience(circuitBreakers, new RetryTemplate(policy));
-    }
-
-    @Bean
-    UserDirectory userDirectory(@LoadBalanced RestClient.Builder loadBalanced, DownstreamClientsProperties properties,
-                                DownstreamResilience resilience) {
-        RestClient client = loadBalanced.clone().baseUrl(properties.userServiceUrl()).build();
-        return new ResilientUserDirectory(new RestUserDirectory(client), resilience);
     }
 
     /** Calls to event-service carry the service account token (capacity routes need SEAT_MANAGER). */

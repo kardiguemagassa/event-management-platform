@@ -90,7 +90,6 @@ springdoc:
 
 registration:
   clients:
-    user-service-url: ${USER_SERVICE_URL:http://user-service}
     event-service-url: ${EVENT_SERVICE_URL:http://event-service}
     connect-timeout: ${DOWNSTREAM_CONNECT_TIMEOUT:1s}
     read-timeout: ${DOWNSTREAM_READ_TIMEOUT:1500ms}

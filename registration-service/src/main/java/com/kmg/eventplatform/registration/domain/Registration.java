@@ -79,6 +79,11 @@ public class Registration {
         return eventId;
     }
 
+    /** A registration is private to the user it belongs to. */
+    public boolean belongsTo(UUID userId) {
+        return this.userId.equals(userId);
+    }
+
     public UUID getUserId() {
         return userId;
     }

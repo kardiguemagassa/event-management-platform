@@ -31,13 +31,16 @@ class OpenApiConfig {
                 .info(new Info()
                         .title("Registration Service API")
                         .version(version)
-                        .description("Registers users to events by orchestrating user-service and event-service. "
+                        .description("Registers the authenticated user to events of event-service. "
                                 + "Errors follow RFC 9457 and carry a stable `code`."))
                 .components(new Components()
                         .addSchemas("ProblemDetail", problemDetailSchema())
                         .addResponses("BadRequest", problemResponse(
                                 "Invalid request (validation, malformed JSON or id, invalid sort)"))
-                        .addResponses("NotFound", problemResponse("Registration, user or event not found"))
+                        .addResponses("NotFound", problemResponse(
+                                "Event not found, or registration not found among the caller's own"))
+                        .addResponses("Forbidden", problemResponse(
+                                "Not the organizer of the event (NOT_EVENT_ORGANIZER)"))
                         .addResponses("Conflict", problemResponse(
                                 "Business conflict (event full or not registrable, already registered, "
                                         + "already cancelled, concurrent modification)"))

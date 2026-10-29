@@ -4,13 +4,14 @@ import com.kmg.eventplatform.registration.TestcontainersConfiguration;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventCatalog;
 import com.kmg.eventplatform.registration.application.EventFullException;
-import com.kmg.eventplatform.registration.application.UserDirectory;
 import com.kmg.eventplatform.security.test.TestTokens;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JCircuitBreakerFactory;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -35,32 +36,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Import(TestcontainersConfiguration.class)
 class DownstreamResilienceIT {
 
-    private static final FakeDownstream USER_SERVICE = FakeDownstream.start();
     private static final FakeDownstream EVENT_SERVICE = FakeDownstream.start();
 
     @DynamicPropertySource
     static void downstreams(DynamicPropertyRegistry registry) {
-        registry.add("spring.cloud.discovery.client.simple.instances.user-service[0].uri", USER_SERVICE::url);
         registry.add("spring.cloud.discovery.client.simple.instances.event-service[0].uri", EVENT_SERVICE::url);
         registry.add("spring.security.oauth2.client.provider.keycloak.token-uri", TestTokens::tokenUri);
     }
 
     @AfterAll
     static void stopDownstreams() {
-        USER_SERVICE.stop();
         EVENT_SERVICE.stop();
     }
 
     @Autowired
-    private UserDirectory users;
-
-    @Autowired
     private EventCatalog events;
 
+    @Autowired
+    private Resilience4JCircuitBreakerFactory circuitBreakers;
+
+    /** Each test starts with closed, empty circuits: the outcome of one test never shifts the next one's window. */
     @BeforeEach
-    void resetDownstreams() {
-        USER_SERVICE.reset();
+    void resetDownstreamAndCircuits() {
         EVENT_SERVICE.reset();
+        circuitBreakers.getCircuitBreakerRegistry().getAllCircuitBreakers().forEach(CircuitBreaker::reset);
     }
 
     @Test
@@ -113,23 +112,28 @@ class DownstreamResilienceIT {
     }
 
     @Test
+    void organizerIsReadFromTheEvent() {
+        UUID organizer = UUID.randomUUID();
+        EVENT_SERVICE.answer(200, "{\"id\":\"" + UUID.randomUUID() + "\",\"organizerId\":\"" + organizer + "\"}");
+
+        assertThat(events.organizerOf(UUID.randomUUID())).hasValue(organizer);
+    }
+
+    @Test
     void repeatedOutagesOpenTheCircuitWhichThenFailsFast() {
         for (int i = 0; i < 8; i++) {
-            USER_SERVICE.answer(503, "");
+            EVENT_SERVICE.answer(503, "");
         }
         for (int i = 0; i < 4; i++) {
-            assertThatThrownBy(() -> users.exists(UUID.randomUUID()))
+            assertThatThrownBy(() -> events.exists(UUID.randomUUID()))
                     .isInstanceOf(DownstreamUnavailableException.class);
         }
-        assertThat(USER_SERVICE.requests()).isEqualTo(8);
-        // Only event-service calls carry the service account token (checked here: any successful call to
-        // user-service in another test would stay in the breaker window and open the circuit earlier).
-        assertThat(USER_SERVICE.authorizations()).containsOnly("");
+        assertThat(EVENT_SERVICE.requests()).isEqualTo(8);
 
-        assertThatThrownBy(() -> users.exists(UUID.randomUUID()))
+        assertThatThrownBy(() -> events.exists(UUID.randomUUID()))
                 .isInstanceOf(DownstreamUnavailableException.class)
                 .hasMessageContaining("circuit breaker is open");
-        assertThat(USER_SERVICE.requests()).isEqualTo(8);
+        assertThat(EVENT_SERVICE.requests()).isEqualTo(8);
     }
 
     /** Claims of a JWT, as text. */

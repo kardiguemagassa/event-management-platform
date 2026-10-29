@@ -11,8 +11,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Every registration call needs a valid access token (the gateway checks it too: zero trust).
- * Role and ownership rules come with the user-centric API.
+ * Role rules of registration-service (the gateway checks the token too: zero trust). Ownership is checked by
+ * the application layer: a registration belongs to its attendee, the registrations of an event to its organizer.
  */
 @Configuration(proxyBeanMethods = false)
 @Import(PlatformSecurityConfiguration.class)
@@ -28,7 +28,11 @@ public class SecurityConfig {
                         // API docs, aggregated by the gateway's Swagger UI; the local Swagger UI when run alone.
                         .requestMatchers(HttpMethod.GET, "/v3/api-docs", "/v3/api-docs/**",
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
-                        .requestMatchers("/api/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/registrations/events/*").hasRole("ORGANIZER")
+                        .requestMatchers(HttpMethod.POST, "/api/registrations", "/api/registrations/*/cancel")
+                        .hasRole("ATTENDEE")
+                        .requestMatchers(HttpMethod.GET, "/api/registrations/me", "/api/registrations/*")
+                        .authenticated()
                         .anyRequest().denyAll())
                 .build();
     }

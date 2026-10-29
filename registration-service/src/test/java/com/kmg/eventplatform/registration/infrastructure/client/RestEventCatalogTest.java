@@ -71,6 +71,38 @@ class RestEventCatalogTest {
     }
 
     @Test
+    void organizerIsReadFromTheEvent() {
+        UUID organizer = UUID.randomUUID();
+        server.expect(requestTo(eventUrl)).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":\"" + eventId + "\",\"title\":\"Meetup\",\"organizerId\":\""
+                        + organizer + "\"}", MediaType.APPLICATION_JSON));
+
+        assertThat(catalog.organizerOf(eventId)).hasValue(organizer);
+    }
+
+    @Test
+    void eventCreatedBeforeOwnershipHasNoOrganizer() {
+        server.expect(requestTo(eventUrl))
+                .andRespond(withSuccess("{\"id\":\"" + eventId + "\",\"organizerId\":null}", MediaType.APPLICATION_JSON));
+
+        assertThat(catalog.organizerOf(eventId)).isEmpty();
+    }
+
+    @Test
+    void organizerOfUnknownEventIsNotFound() {
+        server.expect(requestTo(eventUrl)).andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> catalog.organizerOf(eventId)).isInstanceOf(EventNotFoundException.class);
+    }
+
+    @Test
+    void organizerLookupOnAFailingEventServiceIsUnavailable() {
+        server.expect(requestTo(eventUrl)).andRespond(withServerError());
+
+        assertThatThrownBy(() -> catalog.organizerOf(eventId)).isInstanceOf(DownstreamUnavailableException.class);
+    }
+
+    @Test
     void reserveSendsReservationId() {
         server.expect(requestTo(reserveUrl)).andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.reservationId").value(reservationId.toString()))

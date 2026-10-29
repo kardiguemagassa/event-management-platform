@@ -34,7 +34,7 @@ class ApiDocsIT {
         Map<String, Object> paths = (Map<String, Object>) doc.get("paths");
         assertThat(paths).containsKeys("/api/registrations", "/api/registrations/{id}",
                 "/api/registrations/{id}/cancel", "/api/registrations/events/{eventId}",
-                "/api/registrations/users/{userId}");
+                "/api/registrations/me");
         assertThat(paths.keySet()).allMatch(path -> path.startsWith("/api/"));
 
         Map<String, Object> register = (Map<String, Object>) ((Map<String, Object>) paths.get("/api/registrations"))

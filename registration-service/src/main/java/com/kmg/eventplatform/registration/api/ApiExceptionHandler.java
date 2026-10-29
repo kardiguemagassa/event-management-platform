@@ -7,7 +7,7 @@ import com.kmg.eventplatform.registration.application.EventNotFoundException;
 import com.kmg.eventplatform.registration.application.EventNotRegistrableException;
 import com.kmg.eventplatform.registration.application.RegistrationFailureException;
 import com.kmg.eventplatform.registration.application.RegistrationNotFoundException;
-import com.kmg.eventplatform.registration.application.UserNotFoundException;
+import com.kmg.eventplatform.registration.application.NotEventOrganizerException;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
 import com.kmg.eventplatform.registration.domain.RegistrationRuleException;
 import org.slf4j.Logger;
@@ -41,12 +41,12 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(RegistrationFailureException.class)
     ProblemDetail handleFailure(RegistrationFailureException failure) {
         HttpStatus status = switch (failure) {
-            case UserNotFoundException notFound -> HttpStatus.NOT_FOUND;
             case EventNotFoundException notFound -> HttpStatus.NOT_FOUND;
             case RegistrationNotFoundException notFound -> HttpStatus.NOT_FOUND;
             case EventFullException conflict -> HttpStatus.CONFLICT;
             case EventNotRegistrableException conflict -> HttpStatus.CONFLICT;
             case DuplicateRegistrationException conflict -> HttpStatus.CONFLICT;
+            case NotEventOrganizerException forbidden -> HttpStatus.FORBIDDEN;
             case DownstreamUnavailableException unavailable -> HttpStatus.SERVICE_UNAVAILABLE;
         };
         if (failure instanceof DownstreamUnavailableException) {

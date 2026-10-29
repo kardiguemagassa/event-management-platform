@@ -2,6 +2,7 @@ package com.kmg.eventplatform.registration.infrastructure.client;
 
 import com.kmg.eventplatform.registration.application.EventCatalog;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -21,6 +22,11 @@ final class ResilientEventCatalog implements EventCatalog {
     @Override
     public boolean exists(UUID eventId) {
         return resilience.call(RestEventCatalog.SERVICE, () -> delegate.exists(eventId));
+    }
+
+    @Override
+    public Optional<UUID> organizerOf(UUID eventId) {
+        return resilience.call(RestEventCatalog.SERVICE, () -> delegate.organizerOf(eventId));
     }
 
     @Override
