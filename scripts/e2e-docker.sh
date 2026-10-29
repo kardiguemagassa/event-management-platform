@@ -162,6 +162,36 @@ register 3; check "register attendee 3 on freed seat" 201
 AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
 echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test)"
 
+# Before the outage: these checks are about the content of traces, on a stable platform.
+# One request through gateway, registration-service and event-service (organizer lookup with the service
+# account): started in a known trace, which must reach Tempo with the spans of the three services.
+echo "== Distributed tracing (OpenTelemetry, Grafana Tempo)"
+TRACE_ID=$(openssl rand -hex 16)
+TRACEPARENT="00-$TRACE_ID-$(openssl rand -hex 8)-01" call GET "/api/registrations/events/$E"
+echo "      traced request -> $CODE, trace $TRACE_ID"
+complete() { [[ "$TRACE" == *api-gateway* && "$TRACE" == *registration-service* && "$TRACE" == *event-service* ]]; }
+# Spans are exported in batches and indexed by Tempo within seconds.
+for i in $(seq 1 30); do
+  TRACE=$(curl -s "http://127.0.0.1:3200/api/traces/$TRACE_ID"); complete && break; sleep 2
+done
+if complete; then
+  PASS=$((PASS+1)); echo "PASS  one trace across api-gateway, registration-service and event-service"
+else
+  FAIL=$((FAIL+1)); echo "FAIL  trace $TRACE_ID incomplete in Tempo: ${TRACE:0:300}"
+fi
+# The SQL query of registration-service is a span of the same trace (JDBC observation).
+for i in $(seq 1 5); do
+  [[ "$TRACE" == *"from registrations"* ]] && break; sleep 2; TRACE=$(curl -s "http://127.0.0.1:3200/api/traces/$TRACE_ID")
+done
+[[ "$TRACE" == *"from registrations"* ]] && { PASS=$((PASS+1)); echo "PASS  SQL query span in the trace"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  no SQL query span in trace $TRACE_ID"; }
+# An error answered by a service carries the id of its trace: what a client reports to support.
+ERROR_TRACE_ID=$(openssl rand -hex 16)
+TRACEPARENT="00-$ERROR_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=none call GET /api/events/00000000-0000-0000-0000-000000000001
+[ "$CODE" = 404 ] && [ "$(field traceId)" = "$ERROR_TRACE_ID" ] \
+  && { PASS=$((PASS+1)); echo "PASS  problem response carries the trace id -> $CODE $(field code)"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  problem trace id (expected $ERROR_TRACE_ID) -> $CODE body=$BODY"; }
+
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
 for i in $(seq 1 12); do register 4; echo "      #$i -> $CODE $(field code) ${TIME}s"; done
@@ -183,23 +213,6 @@ echo "== No seat leaked"
 SEATS=$(field availableSeats)
 [ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, attendees 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
-
-# One request through gateway, registration-service and event-service (organizer lookup with the service
-# account): started in a known trace, which must reach Tempo with the spans of the three services.
-echo "== Distributed tracing (OpenTelemetry, Grafana Tempo)"
-TRACE_ID=$(openssl rand -hex 16)
-TRACEPARENT="00-$TRACE_ID-$(openssl rand -hex 8)-01" call GET "/api/registrations/events/$E"
-echo "      traced request -> $CODE, trace $TRACE_ID"
-complete() { [[ "$TRACE" == *api-gateway* && "$TRACE" == *registration-service* && "$TRACE" == *event-service* ]]; }
-# Spans are exported in batches and indexed by Tempo within seconds.
-for i in $(seq 1 30); do
-  TRACE=$(curl -s "http://127.0.0.1:3200/api/traces/$TRACE_ID"); complete && break; sleep 2
-done
-if complete; then
-  PASS=$((PASS+1)); echo "PASS  one trace across api-gateway, registration-service and event-service"
-else
-  FAIL=$((FAIL+1)); echo "FAIL  trace $TRACE_ID incomplete in Tempo: ${TRACE:0:300}"
-fi
 
 echo "== Right to erasure"
 AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204

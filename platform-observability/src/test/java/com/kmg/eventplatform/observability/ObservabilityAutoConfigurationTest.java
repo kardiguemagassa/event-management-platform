@@ -16,7 +16,8 @@ class ObservabilityAutoConfigurationTest {
     @Test
     void servletServicesGetTheServletActuatorFilter() {
         new WebApplicationContextRunner().withConfiguration(CONFIGURATION).run(context -> {
-            assertThat(context).hasSingleBean(NoiseFilter.class).hasSingleBean(ServletActuatorFilter.class);
+            assertThat(context).hasSingleBean(NoiseFilter.class).hasSingleBean(ServletActuatorFilter.class)
+                    .hasSingleBean(TraceIdProblemAdvice.class);
             assertThat(context).doesNotHaveBean(ReactiveActuatorFilter.class);
         });
     }
@@ -25,7 +26,7 @@ class ObservabilityAutoConfigurationTest {
     void reactiveGatewayGetsTheReactiveActuatorFilter() {
         new ReactiveWebApplicationContextRunner().withConfiguration(CONFIGURATION).run(context -> {
             assertThat(context).hasSingleBean(NoiseFilter.class).hasSingleBean(ReactiveActuatorFilter.class);
-            assertThat(context).doesNotHaveBean(ServletActuatorFilter.class);
+            assertThat(context).doesNotHaveBean(ServletActuatorFilter.class).doesNotHaveBean(TraceIdProblemAdvice.class);
         });
     }
 

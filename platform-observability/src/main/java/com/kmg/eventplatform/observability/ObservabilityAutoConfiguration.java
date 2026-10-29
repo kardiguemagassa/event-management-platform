@@ -1,6 +1,8 @@
 package com.kmg.eventplatform.observability;
 
 import io.micrometer.observation.ObservationPredicate;
+import io.micrometer.tracing.Tracer;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
@@ -26,6 +28,11 @@ public class ObservabilityAutoConfiguration {
         @Bean
         ObservationPredicate servletActuatorFilter() {
             return new ServletActuatorFilter();
+        }
+
+        @Bean
+        TraceIdProblemAdvice traceIdProblemAdvice(ObjectProvider<Tracer> tracer) {
+            return new TraceIdProblemAdvice(tracer);
         }
     }
 

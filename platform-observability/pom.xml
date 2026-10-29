@@ -29,10 +29,15 @@
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
         </dependency>
-        <!-- Servlet services only: the gateway (WebFlux) has no Servlet API, the servlet filter is not loaded there -->
+        <!-- Servlet services only: the gateway (WebFlux) has neither, the servlet beans are not loaded there -->
         <dependency>
             <groupId>jakarta.servlet</groupId>
             <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>
