@@ -115,6 +115,17 @@ for route in /api/users/me /api/events /api/registrations/me; do
   case "$CODE" in 5*|000) echo "FAIL  the gateway does not route $route"; exit 1 ;; esac
 done
 
+echo "== API documentation (Swagger UI login)"
+# Each document declares the Keycloak scheme: the Swagger UI "Authorize" button signs in with it.
+DOCS_OK=1
+for service in user-service event-service registration-service; do
+  AUTH=none call GET "/api-docs/$service"
+  [[ "$CODE" = 200 && "$BODY" == *'"securitySchemes"'* && "$BODY" == *"/protocol/openid-connect/auth"* ]] \
+    || { DOCS_OK=0; echo "      $service -> $CODE ${BODY:0:200}"; }
+done
+[ "$DOCS_OK" = 1 ] && { PASS=$((PASS+1)); echo "PASS  every API document declares the Keycloak OAuth2 scheme"; } \
+                   || { FAIL=$((FAIL+1)); echo "FAIL  Keycloak OAuth2 scheme missing from an API document"; }
+
 echo "== Profiles (user-service)"
 for n in 1 2 3 4; do
   AUTH=$(attendee_token "$n") call PUT /api/users/me "{\"fullName\":\"Attendee $n\"}"

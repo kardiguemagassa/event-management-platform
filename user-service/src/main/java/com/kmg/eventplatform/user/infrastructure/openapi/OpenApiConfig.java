@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.user.infrastructure.openapi;
 
+import com.kmg.eventplatform.security.PlatformOpenApi;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
@@ -11,6 +12,7 @@ import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.media.StringSchema;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,7 +27,8 @@ class OpenApiConfig {
     private static final String PROBLEM_SCHEMA_REF = "#/components/schemas/ProblemDetail";
 
     @Bean
-    OpenAPI userServiceOpenApi(ObjectProvider<BuildProperties> buildProperties) {
+    OpenAPI userServiceOpenApi(ObjectProvider<BuildProperties> buildProperties,
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri) {
         BuildProperties build = buildProperties.getIfAvailable();
         String version = build != null ? build.getVersion() : "dev";
 
@@ -35,7 +38,9 @@ class OpenApiConfig {
                         .version(version)
                         .description("Application profiles of the users; identity (credentials, e-mail, roles) "
                                 + "is managed by Keycloak. Errors follow RFC 9457 and carry a stable `code`."))
+                .addSecurityItem(PlatformOpenApi.requirement())
                 .components(new Components()
+                        .addSecuritySchemes(PlatformOpenApi.SECURITY_SCHEME, PlatformOpenApi.keycloak(issuerUri))
                         .addSchemas("ProblemDetail", problemDetailSchema())
                         .addResponses("BadRequest", problemResponse(
                                 "Invalid request (validation, malformed JSON, invalid sort, no e-mail in the token)"))

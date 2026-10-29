@@ -26,6 +26,8 @@ class PlatformSecurityIT {
         registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestTokens::jwkSetUri);
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> TestTokens.ISSUER);
         registry.add("spring.security.oauth2.resourceserver.jwt.audiences", () -> TestTokens.AUDIENCE);
+        // springdoc is on the test classpath for PlatformOpenApi only: no API documentation in this context
+        registry.add("springdoc.api-docs.enabled", () -> "false");
     }
 
     @Value("${local.server.port}")
