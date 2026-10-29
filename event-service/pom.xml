@@ -54,6 +54,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Distributed tracing (OpenTelemetry), shared setup -->
+        <dependency>
+            <groupId>com.kmg.eventplatform</groupId>
+            <artifactId>platform-observability</artifactId>
+        </dependency>
+        <!-- One span per SQL query, inside the trace of the request -->
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

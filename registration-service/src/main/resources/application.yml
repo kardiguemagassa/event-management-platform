@@ -77,6 +77,20 @@ management:
     health:
       probes:
         enabled: true
+  # Traces over OTLP (HTTP) to the OpenTelemetry collector: Grafana Tempo in development (compose service otel-lgtm).
+  tracing:
+    sampling:
+      # 10 % unless told otherwise (production); compose and .env.example set 100 % for development.
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
 
 springdoc:
   api-docs:
@@ -105,3 +119,9 @@ registration:
       permitted-number-of-calls-in-half-open-state: 3
       # A half-open circuit that cannot conclude goes back to open after this delay, instead of waiting forever.
       max-wait-duration-in-half-open-state: 10s
+
+# SQL spans: queries only (no connection or result-set spans), never the parameter values (personal data).
+jdbc:
+  includes: query
+  datasource-proxy:
+    include-parameter-values: false

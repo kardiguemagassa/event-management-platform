@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.kmg.eventplatform</groupId>
+        <artifactId>event-management-platform</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>platform-observability</artifactId>
+    <name>Platform Observability</name>
+    <description>OpenTelemetry setup shared by the services: traces exported over OTLP, without the noise</description>
+
+    <properties>
+        <jacoco.line.minimum>0.90</jacoco.line.minimum>
+        <jacoco.branch.minimum>0.80</jacoco.branch.minimum>
+    </properties>
+
+    <dependencies>
+        <!-- Micrometer Tracing bridged to OpenTelemetry, OTLP exporters: brought to every service using this module -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+        <!-- Servlet services only: the gateway (WebFlux) has neither, the servlet beans are not loaded there -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Reactive web application context in tests (the gateway's setup) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webflux</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
