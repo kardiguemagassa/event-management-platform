@@ -73,10 +73,10 @@ jobs:
       - name: Create .env
         run: |
           cp .env.example .env
-          for service in USER EVENT REGISTRATION; do
-            password=$(openssl rand -hex 16)
-            echo "::add-mask::$password"
-            sed -i "s|^${service}_DB_PASSWORD=.*|${service}_DB_PASSWORD=${password}|" .env
+          for key in USER_DB_PASSWORD EVENT_DB_PASSWORD REGISTRATION_DB_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD REGISTRATION_SERVICE_CLIENT_SECRET; do
+            value=$(openssl rand -hex 16)
+            echo "::add-mask::$value"
+            sed -i "s|^${key}=.*|${key}=${value}|" .env
           done
       - name: Start the platform
         run: docker compose --profile app up -d --build --wait --wait-timeout 300

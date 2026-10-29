@@ -1,0 +1,96 @@
+{
+  "realm": "event-platform",
+  "displayName": "Event Management Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "verifyEmail": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "passwordPolicy": "length(12) and notUsername and notEmail",
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "ATTENDEE",
+        "description": "Registers to events; given to every new user"
+      },
+      {
+        "name": "ORGANIZER",
+        "description": "Creates, publishes and cancels events"
+      },
+      {
+        "name": "SEAT_MANAGER",
+        "description": "Technical role: reserves and releases seats (registration-service only)"
+      },
+      {
+        "name": "offline_access"
+      },
+      {
+        "name": "uma_authorization"
+      },
+      {
+        "name": "default-roles-event-platform",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "ATTENDEE",
+            "offline_access",
+            "uma_authorization"
+          ]
+        }
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-event-platform"
+  },
+  "clients": [
+    {
+      "clientId": "event-platform-web",
+      "name": "Event platform web application",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:4200/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "http://localhost:4200",
+        "http://localhost:8080"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:4200/*"
+      }
+    },
+    {
+      "clientId": "registration-service",
+      "name": "registration-service (service account)",
+      "publicClient": false,
+      "secret": "${REGISTRATION_SERVICE_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-registration-service",
+      "enabled": true,
+      "serviceAccountClientId": "registration-service",
+      "realmRoles": [
+        "SEAT_MANAGER"
+      ]
+    }
+  ]
+}
