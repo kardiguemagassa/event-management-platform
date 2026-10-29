@@ -39,6 +39,7 @@ class GatewayResilienceIT {
         registry.add("spring.cloud.discovery.client.simple.instances.event-service[0].uri",
                 () -> "http://localhost:" + CLOSED_PORT);
         registry.add("spring.cloud.discovery.client.simple.instances.event-service[1].uri", BACKEND::url);
+        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestTokens::jwkSetUri);
     }
 
     @Value("${local.server.port}")
@@ -95,6 +96,7 @@ class GatewayResilienceIT {
     private HttpResponse<String> send(String method, String path) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + TestTokens.valid())
                 .method(method, "GET".equals(method)
                         ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString("{}"))
