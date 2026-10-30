@@ -7,6 +7,8 @@ public final class OpenApiResponses {
     public static final String NOT_FOUND = "#/components/responses/NotFound";
     public static final String FORBIDDEN = "#/components/responses/Forbidden";
     public static final String CONFLICT = "#/components/responses/Conflict";
+    /** Role missing (platform-security {@code PlatformOpenApi.ACCESS_DENIED}). */
+    public static final String ACCESS_DENIED = "#/components/responses/AccessDenied";
 
     private OpenApiResponses() {
     }

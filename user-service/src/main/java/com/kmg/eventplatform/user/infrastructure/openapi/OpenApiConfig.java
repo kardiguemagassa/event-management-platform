@@ -4,13 +4,12 @@ import com.kmg.eventplatform.security.PlatformOpenApi;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.IntegerSchema;
-import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.ObjectSchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.media.StringSchema;
-import io.swagger.v3.oas.models.responses.ApiResponse;
+import java.util.Map;
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
@@ -22,9 +21,6 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration(proxyBeanMethods = false)
 class OpenApiConfig {
-
-    private static final String PROBLEM_JSON = "application/problem+json";
-    private static final String PROBLEM_SCHEMA_REF = "#/components/schemas/ProblemDetail";
 
     @Bean
     OpenAPI userServiceOpenApi(ObjectProvider<BuildProperties> buildProperties,
@@ -41,11 +37,32 @@ class OpenApiConfig {
                 .addSecurityItem(PlatformOpenApi.requirement())
                 .components(new Components()
                         .addSecuritySchemes(PlatformOpenApi.SECURITY_SCHEME, PlatformOpenApi.keycloak(issuerUri))
-                        .addSchemas("ProblemDetail", problemDetailSchema())
-                        .addResponses("BadRequest", problemResponse(
-                                "Invalid request (validation, malformed JSON, invalid sort, no e-mail in the token)"))
-                        .addResponses("NotFound", problemResponse("Profile not found (not saved yet, or deleted)"))
-                        .addResponses("Conflict", problemResponse("Conflict (email already used, concurrent modification)")));
+                        .addSchemas(PlatformOpenApi.PROBLEM_SCHEMA, problemDetailSchema())
+                        .addResponses("BadRequest", PlatformOpenApi.problem(
+                                "Invalid request (validation, malformed JSON, invalid sort, no e-mail in the token)",
+                                withErrors(PlatformOpenApi.problemExample(400, "Validation failed",
+                                        "One or more fields are invalid", "/api/users/me", "VALIDATION_FAILED"),
+                                        "fullName", "must not be blank")))
+                        .addResponses("NotFound", PlatformOpenApi.problem(
+                                "Profile not found (not saved yet, or deleted)",
+                                PlatformOpenApi.problemExample(404, "User not found",
+                                        "User 4b5aa969-… not found", "/api/users/me", "USER_NOT_FOUND")))
+                        .addResponses("Conflict", PlatformOpenApi.problem(
+                                "Conflict (email already used, concurrent modification)",
+                                PlatformOpenApi.problemExample(409, "Email already used",
+                                        "Email jane@example.com is already used", "/api/users/me",
+                                        "EMAIL_ALREADY_USED"))));
+    }
+
+    /** 401 on every operation and the shared 403 response (platform-security). */
+    @Bean
+    OpenApiCustomizer securityErrors() {
+        return PlatformOpenApi::documentSecurityErrors;
+    }
+
+    private static Map<String, Object> withErrors(Map<String, Object> example, String field, String message) {
+        example.put("errors", Map.of(field, message));
+        return example;
     }
 
     private static Schema<?> problemDetailSchema() {
@@ -57,12 +74,5 @@ class OpenApiConfig {
                 .addProperty("instance", new StringSchema().example("/api/users/3f2b8c1e-…"))
                 .addProperty("code", new StringSchema().example("USER_NOT_FOUND")
                         .description("Stable machine-readable error code"));
-    }
-
-    private static ApiResponse problemResponse(String description) {
-        return new ApiResponse()
-                .description(description)
-                .content(new Content().addMediaType(PROBLEM_JSON,
-                        new MediaType().schema(new Schema<>().$ref(PROBLEM_SCHEMA_REF))));
     }
 }
