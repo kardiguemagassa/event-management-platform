@@ -149,6 +149,11 @@ services:
       - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform.yaml:ro
       - ./observability/grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform:ro
       - ./observability/grafana/alerting.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/event-platform.yaml:ro
+    # The image's own health check, with a long start period: on a loaded machine Grafana alone took 170 s to start,
+    # and `up --wait` reported the container unhealthy before it was ready.
+    healthcheck:
+      start_period: 180s
+      start_interval: 5s
 
   discovery-server:
     <<: *spring-service
