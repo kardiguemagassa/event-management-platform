@@ -41,6 +41,9 @@
         <springdoc.version>3.2.0</springdoc.version>
         <!-- SQL spans (JDBC observations); not managed by Spring Boot -->
         <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
+        <!-- Logback appender for OTLP logs; not managed by Spring Boot. Must match the OpenTelemetry SDK that Spring Boot
+             manages (opentelemetry.version 1.62.0 pairs with instrumentation 2.28.0): update both together. -->
+        <opentelemetry-instrumentation.version>2.28.0-alpha</opentelemetry-instrumentation.version>
         <!-- Base JVM arguments for tests; coverage agents (JaCoCo) are added to it later -->
         <argLine></argLine>
     </properties>
@@ -63,6 +66,11 @@
                 <groupId>com.kmg.eventplatform</groupId>
                 <artifactId>platform-observability</artifactId>
                 <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry.instrumentation</groupId>
+                <artifactId>opentelemetry-logback-appender-1.0</artifactId>
+                <version>${opentelemetry-instrumentation.version}</version>
             </dependency>
             <dependency>
                 <groupId>net.ttddyy.observation</groupId>

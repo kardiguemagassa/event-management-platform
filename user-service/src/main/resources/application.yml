@@ -64,6 +64,11 @@ management:
       export:
         otlp:
           endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+    # Logs over OTLP as well (Loki in development), each record with the trace and span ids of the current span.
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_LOGS_ENDPOINT:http://localhost:4318/v1/logs}
   otlp:
     metrics:
       export:

@@ -176,13 +176,15 @@ check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
 register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
 AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; echo "      cancel attendee 1 -> $CODE"
 register 3; check "register attendee 3 on freed seat" 201
-AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
-echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test)"
+# Started in a known trace: its log line is looked up in Loki below.
+LOG_TRACE_ID=$(openssl rand -hex 16)
+TRACEPARENT="00-$LOG_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
+echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test), trace $LOG_TRACE_ID"
 
 # Before the outage: these checks are about the content of traces, on a stable platform.
 # One request through gateway, registration-service and event-service (organizer lookup with the service
 # account): started in a known trace, which must reach Tempo with the spans of the three services.
-echo "== Distributed tracing (OpenTelemetry, Grafana Tempo)"
+echo "== Distributed tracing and logs (OpenTelemetry, Grafana Tempo and Loki)"
 TRACE_ID=$(openssl rand -hex 16)
 TRACEPARENT="00-$TRACE_ID-$(openssl rand -hex 8)-01" call GET "/api/registrations/events/$E"
 echo "      traced request -> $CODE, trace $TRACE_ID"
@@ -208,6 +210,15 @@ TRACEPARENT="00-$ERROR_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=none call GET /a
 [ "$CODE" = 404 ] && [ "$(field traceId)" = "$ERROR_TRACE_ID" ] \
   && { PASS=$((PASS+1)); echo "PASS  problem response carries the trace id -> $CODE $(field code)"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  problem trace id (expected $ERROR_TRACE_ID) -> $CODE body=$BODY"; }
+
+# The log of a request reaches Loki with the id of its trace: Grafana goes from a trace to its logs.
+logs_of_trace() {
+  curl -s -G http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode since=15m \
+    --data-urlencode "query={service_name=\"registration-service\"} | trace_id=\"$LOG_TRACE_ID\""
+}
+for i in $(seq 1 15); do LOGS=$(logs_of_trace); [[ "$LOGS" == *"cancelled on event"* ]] && break; sleep 2; done
+[[ "$LOGS" == *"cancelled on event"* ]] && { PASS=$((PASS+1)); echo "PASS  log of the request in Loki with its trace id"; } \
+                                     || { FAIL=$((FAIL+1)); echo "FAIL  no log for trace $LOG_TRACE_ID in Loki: ${LOGS:0:300}"; }
 
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1

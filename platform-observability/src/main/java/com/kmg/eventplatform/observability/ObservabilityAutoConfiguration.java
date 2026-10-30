@@ -2,6 +2,7 @@ package com.kmg.eventplatform.observability;
 
 import io.micrometer.observation.ObservationPredicate;
 import io.micrometer.tracing.Tracer;
+import io.opentelemetry.api.OpenTelemetry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -11,7 +12,8 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Applied to every service depending on this module. Export and sampling are standard Spring Boot properties
- * ({@code management.opentelemetry.tracing.export.otlp.*}, {@code management.tracing.sampling.probability}).
+ * ({@code management.opentelemetry.tracing.export.otlp.*}, {@code management.opentelemetry.logging.export.otlp.*},
+ * {@code management.tracing.sampling.probability}).
  */
 @AutoConfiguration
 public class ObservabilityAutoConfiguration {
@@ -19,6 +21,11 @@ public class ObservabilityAutoConfiguration {
     @Bean
     ObservationPredicate platformNoiseFilter() {
         return new NoiseFilter();
+    }
+
+    @Bean
+    OpenTelemetryLogsInstaller openTelemetryLogsInstaller(ObjectProvider<OpenTelemetry> openTelemetry) {
+        return new OpenTelemetryLogsInstaller(openTelemetry);
     }
 
     @Configuration(proxyBeanMethods = false)

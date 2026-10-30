@@ -55,7 +55,11 @@ public class RegistrationService {
         UUID registrationId = UUID.randomUUID();
         reserveSeat(eventId, registrationId);
         try {
-            return repository.saveAndFlush(Registration.confirm(registrationId, eventId, userId, clock.instant()));
+            Registration confirmed =
+                    repository.saveAndFlush(Registration.confirm(registrationId, eventId, userId, clock.instant()));
+            // Ids only, no personal data: the audit trail of the saga, correlated with its trace in Grafana.
+            log.info("Registration {} confirmed on event {}", registrationId, eventId);
+            return confirmed;
         } catch (RuntimeException saveFailure) {
             releaseSeatQuietly(eventId, registrationId, saveFailure);
             if (isActiveRegistrationConflict(saveFailure)) {
@@ -76,7 +80,9 @@ public class RegistrationService {
         }
         events.releaseSeat(registration.getEventId(), registration.getId());
         registration.cancel(clock.instant());
-        return repository.saveAndFlush(registration);
+        Registration cancelled = repository.saveAndFlush(registration);
+        log.info("Registration {} cancelled on event {}", registrationId, registration.getEventId());
+        return cancelled;
     }
 
     /**

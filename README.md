@@ -125,16 +125,21 @@ audience `event-platform-api`, checked by every service.
 ## Observability
 
 Each request gets a trace, propagated with the W3C `traceparent` header from the gateway to the services
-(load-balanced `RestClient` included) and exported over OTLP. In development, everything goes to `grafana/otel-lgtm`:
+(load-balanced `RestClient` included). Traces, metrics and logs are exported over OTLP. In development, everything goes
+to `grafana/otel-lgtm`:
 
 | URL | Purpose |
 |---|---|
 | `http://localhost:3000` | Grafana (`admin` / `admin`): **Explore**, data source **Tempo**, search by service or paste a trace id |
 | `http://localhost:3200/api/traces/<traceId>` | Tempo API, used by the end-to-end test |
+| `http://localhost:3100/loki/api/v1/query_range` | Loki API, used by the end-to-end test |
 
 - **Spans**: gateway, services, calls between services, and one span per SQL query (`datasource-micrometer`, query text
   without parameter values). Health probes, Eureka calls and Spring Security internals are filtered out.
-- **Logs**: every line carries `[traceId-spanId]`.
+- **Logs**: every line carries `[traceId-spanId]` on the console, and is sent to Loki with its trace and span ids
+  (OpenTelemetry Logback appender, installed by `platform-observability`: no `logback-spring.xml` per service). In
+  Grafana, **Explore**, data source **Loki**: `{service_name="registration-service"} | trace_id="<traceId>"`, or from a
+  trace in Tempo, the logs of a span. `registration-service` logs each confirmed and cancelled registration (ids only).
 - **Errors**: every problem answered by a service carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
@@ -221,7 +226,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (31 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (32 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
@@ -232,7 +237,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (31 c
 - resilience: `event-service` outage (fast `503` once the circuit is open, gateway fallback), recovery after restart,
   and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
-  `event-service` and its SQL query, and an error response carries the id of its trace.
+  `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
+  reaches Loki with its trace id.
 
 ### Docker setup at a glance
 
@@ -335,8 +341,10 @@ pull request would change `main` directly and require merging `main` back into `
 
 - **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
   cookie, token relay to the services), so that no token is ever stored in the browser.
-- **Observability**: Grafana dashboards on the exported metrics (latency, errors, circuit breaker states), logs
-  shipped to Loki, trace id in the gateway's own errors.
+- **Observability**: Grafana dashboards on the exported metrics (latency, errors, circuit breaker states), business
+  metrics and alerts, trace id in the gateway's own errors.
+- **Keycloak login theme**: the sign-in and registration pages styled like the Angular front-end (Keycloakify or a
+  FreeMarker/CSS theme), still served by Keycloak.
 - **Reliability**: transactional outbox and messaging for the registration saga.
 - **Frontend**: Angular application served by nginx, proxying `/api` to the gateway (same origin, no CORS), with a
   TypeScript client generated from the OpenAPI specifications and login through the gateway (BFF).
