@@ -95,7 +95,10 @@
       "options": {
         "showValue": "never",
         "mergeValues": true,
-        "rowHeight": 0.8
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        }
       },
       "targets": [
         {
@@ -130,6 +133,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -184,6 +188,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -238,6 +243,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "normal"
             }
@@ -292,6 +298,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "normal"
             }
@@ -346,6 +353,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -400,6 +408,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }

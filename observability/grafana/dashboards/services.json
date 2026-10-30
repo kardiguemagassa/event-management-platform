@@ -101,6 +101,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -155,6 +156,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -209,6 +211,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -263,6 +266,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -317,6 +321,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "normal"
             }
@@ -439,6 +444,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -493,6 +499,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -547,6 +554,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -601,6 +609,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
@@ -664,6 +673,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
+            "showPoints": "never",
             "stacking": {
               "mode": "none"
             }
