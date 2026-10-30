@@ -4,6 +4,7 @@ import com.kmg.eventplatform.registration.domain.Registration;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
 import com.kmg.eventplatform.registration.domain.RegistrationRepository;
 import com.kmg.eventplatform.registration.domain.RegistrationStatus;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,13 +44,15 @@ class RegistrationServiceTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID organizerId = UUID.randomUUID();
     private final FakeEventCatalog events = new FakeEventCatalog();
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private RegistrationService service;
 
     @BeforeEach
     void setUp() {
         events.events.add(eventId);
         events.organizers.put(eventId, organizerId);
-        service = new RegistrationService(repository, events, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new RegistrationService(repository, events, Clock.fixed(NOW, ZoneOffset.UTC),
+                new RegistrationMetrics(meters));
     }
 
     @Test
@@ -254,5 +257,43 @@ class RegistrationServiceTest {
 
     private Registration confirmedRegistration() {
         return Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.minusSeconds(3600));
+    }
+
+    @Test
+    void confirmedRegistrationIsCounted() {
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.register(eventId, userId);
+
+        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).isEqualTo(1);
+    }
+
+    @Test
+    void rejectionIsCountedWithItsReason() {
+        assertThatThrownBy(() -> service.register(UUID.randomUUID(), userId))
+                .isInstanceOf(EventNotFoundException.class);
+        when(repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED))
+                .thenReturn(true);
+        assertThatThrownBy(() -> service.register(eventId, userId))
+                .isInstanceOf(DuplicateRegistrationException.class);
+
+        assertThat(rejected("EVENT_NOT_FOUND")).isEqualTo(1);
+        assertThat(rejected("ALREADY_REGISTERED")).isEqualTo(1);
+        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).isZero();
+    }
+
+    @Test
+    void cancellationIsCounted() {
+        Registration registration = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.cancel(registration.getId(), userId);
+
+        assertThat(meters.counter(RegistrationMetrics.CANCELLED).count()).isEqualTo(1);
+    }
+
+    private double rejected(String reason) {
+        return meters.counter(RegistrationMetrics.REJECTED, RegistrationMetrics.REASON, reason).count();
     }
 }

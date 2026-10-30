@@ -33,15 +33,34 @@ public class RegistrationService {
     private final RegistrationRepository repository;
     private final EventCatalog events;
     private final Clock clock;
+    private final RegistrationMetrics metrics;
 
-    public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock) {
+    public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock,
+                               RegistrationMetrics metrics) {
         this.repository = repository;
         this.events = events;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
-    /** @param userId the authenticated attendee, from the access token */
+    /**
+     * Counted: confirmed, or rejected with the code of the failure (event full, already registered, downstream
+     * unavailable...).
+     *
+     * @param userId the authenticated attendee, from the access token
+     */
     public Registration register(UUID eventId, UUID userId) {
+        try {
+            Registration confirmed = confirm(eventId, userId);
+            metrics.confirmed();
+            return confirmed;
+        } catch (RegistrationFailureException rejected) {
+            metrics.rejected(rejected.code());
+            throw rejected;
+        }
+    }
+
+    private Registration confirm(UUID eventId, UUID userId) {
         if (!events.exists(eventId)) {
             throw new EventNotFoundException(eventId);
         }
@@ -55,7 +74,11 @@ public class RegistrationService {
         UUID registrationId = UUID.randomUUID();
         reserveSeat(eventId, registrationId);
         try {
-            return repository.saveAndFlush(Registration.confirm(registrationId, eventId, userId, clock.instant()));
+            Registration confirmed =
+                    repository.saveAndFlush(Registration.confirm(registrationId, eventId, userId, clock.instant()));
+            // Ids only, no personal data: the audit trail of the saga, correlated with its trace in Grafana.
+            log.info("Registration {} confirmed on event {}", registrationId, eventId);
+            return confirmed;
         } catch (RuntimeException saveFailure) {
             releaseSeatQuietly(eventId, registrationId, saveFailure);
             if (isActiveRegistrationConflict(saveFailure)) {
@@ -76,7 +99,10 @@ public class RegistrationService {
         }
         events.releaseSeat(registration.getEventId(), registration.getId());
         registration.cancel(clock.instant());
-        return repository.saveAndFlush(registration);
+        Registration cancelled = repository.saveAndFlush(registration);
+        metrics.cancelled();
+        log.info("Registration {} cancelled on event {}", registrationId, registration.getEventId());
+        return cancelled;
     }
 
     /**

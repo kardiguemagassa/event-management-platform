@@ -2,6 +2,7 @@ package com.kmg.eventplatform.registration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,6 +43,20 @@ class ApiDocsIT {
         assertThat((Map<String, Object>) register.get("responses")).containsKeys("201", "400", "404", "409", "503");
 
         Map<String, Object> components = (Map<String, Object>) doc.get("components");
+        Map<String, Object> securitySchemes = (Map<String, Object>) components.get("securitySchemes");
+        assertThat(securitySchemes).containsOnlyKeys("keycloak");
+        assertThat(securitySchemes.get("keycloak").toString()).contains("/protocol/openid-connect/auth");
+        assertThat((List<?>) doc.get("security")).hasSize(1);
+
+        // Each error response has its own example; 401 is documented on every operation
+        Map<String, Object> errorResponses = (Map<String, Object>) components.get("responses");
+        assertThat(errorResponses).containsKeys("Unauthorized", "AccessDenied");
+        assertThat(errorResponses.get("NotFound").toString()).contains("status=404").doesNotContain("status=409");
+        assertThat(errorResponses.get("BadRequest").toString()).contains("VALIDATION_FAILED");
+        assertThat(paths.values()).allSatisfy(path -> ((Map<String, Object>) path).values().stream()
+                .filter(Map.class::isInstance)
+                .map(operation -> (Map<String, Object>) ((Map<String, Object>) operation).get("responses"))
+                .forEach(operationResponses -> assertThat(operationResponses).containsKey("401")));
         assertThat((Map<String, Object>) components.get("responses"))
                 .containsKeys("BadRequest", "NotFound", "Conflict", "ServiceUnavailable");
     }

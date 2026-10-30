@@ -21,10 +21,12 @@ x-spring-environment: &spring-environment
   # Token validation: keys from Keycloak on the compose network, issuer as written in tokens (public URL).
   KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/event-platform/protocol/openid-connect/certs
   KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-8180}/realms/event-platform
-  # Every request traced in development, traces and metrics sent to the collector on the compose network.
+  # Every request traced in development, traces, metrics and logs sent to the collector on the compose network.
   TRACING_SAMPLING_PROBABILITY: "1.0"
   OTEL_TRACES_ENDPOINT: http://otel-lgtm:4318/v1/traces
   OTEL_METRICS_ENDPOINT: http://otel-lgtm:4318/v1/metrics
+  OTEL_LOGS_ENDPOINT: http://otel-lgtm:4318/v1/logs
+  OTEL_METRICS_STEP: 10s
 
 x-healthcheck-timing: &healthcheck-timing
   interval: 5s
@@ -141,6 +143,17 @@ services:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"   # Grafana (admin / admin)
       - "127.0.0.1:4318:4318"                     # OTLP over HTTP, for services started from the IDE
       - "127.0.0.1:3200:3200"                     # Tempo API: traces by id (end-to-end test)
+      - "127.0.0.1:3100:3100"                     # Loki API: logs of a trace (end-to-end test)
+    # The platform's dashboards and alert rules (observability/grafana), provisioned at startup ("Event Platform" folder).
+    volumes:
+      - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform.yaml:ro
+      - ./observability/grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform:ro
+      - ./observability/grafana/alerting.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/event-platform.yaml:ro
+    # The image's own health check, with a long start period: on a loaded machine Grafana alone took 170 s to start,
+    # and `up --wait` reported the container unhealthy before it was ready.
+    healthcheck:
+      start_period: 180s
+      start_interval: 5s
 
   discovery-server:
     <<: *spring-service

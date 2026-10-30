@@ -33,7 +33,7 @@ class ObservabilityAutoConfigurationTest {
     @Test
     void nonWebApplicationsOnlyFilterTheNoise() {
         new ApplicationContextRunner().withConfiguration(CONFIGURATION).run(context -> {
-            assertThat(context).hasSingleBean(NoiseFilter.class);
+            assertThat(context).hasSingleBean(NoiseFilter.class).hasSingleBean(OpenTelemetryLogsInstaller.class);
             assertThat(context).doesNotHaveBean(ServletActuatorFilter.class).doesNotHaveBean(ReactiveActuatorFilter.class);
         });
     }

@@ -110,10 +110,34 @@ echo "      test users and client ready"
 # Healthy containers are not routable yet: the gateway must first see each service in Eureka.
 # Routed means answered by the service itself: any status but a 5xx (gateway fallback) or no answer at all.
 echo "== Waiting for the gateway to route every service"
+# Three answers in a row: a single one passed while the gateway breaker was still recording startup failures, and
+# the scenario then hit its fallback (issue #37).
 for route in /api/users/me /api/events /api/registrations/me; do
-  for i in $(seq 1 60); do call GET "$route"; case "$CODE" in 5*|000) sleep 2 ;; *) break ;; esac; done
-  case "$CODE" in 5*|000) echo "FAIL  the gateway does not route $route"; exit 1 ;; esac
+  ROUTED=0
+  for i in $(seq 1 120); do
+    call GET "$route"
+    case "$CODE" in 5*|000) ROUTED=0 ;; *) ROUTED=$((ROUTED+1)) ;; esac
+    [ "$ROUTED" -ge 3 ] && break; sleep 1
+  done
+  [ "$ROUTED" -ge 3 ] || { echo "FAIL  the gateway does not route $route steadily (last: $CODE)"; exit 1; }
 done
+
+echo "== API documentation (Swagger UI login)"
+# Each document declares the Keycloak scheme: the Swagger UI "Authorize" button signs in with it.
+DOCS_OK=1
+for service in user-service event-service registration-service; do
+  AUTH=none call GET "/api-docs/$service"
+  [[ "$CODE" = 200 && "$BODY" == *'"securitySchemes"'* && "$BODY" == *"/protocol/openid-connect/auth"* ]] \
+    || { DOCS_OK=0; echo "      $service -> $CODE ${BODY:0:200}"; }
+done
+# What a browser does: /swagger-ui.html leads to a served UI, and Keycloak redirects back to a served page.
+UI_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -L "$G/swagger-ui.html")
+AUTH=none call GET /v3/api-docs/swagger-config; REDIRECT_URL=$(field oauth2RedirectUrl)
+REDIRECT_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$REDIRECT_URL")
+[ "$UI_STATUS" = 200 ] && [ "$REDIRECT_STATUS" = 200 ] \
+  || { DOCS_OK=0; echo "      swagger-ui.html -> $UI_STATUS, $REDIRECT_URL -> $REDIRECT_STATUS"; }
+[ "$DOCS_OK" = 1 ] && { PASS=$((PASS+1)); echo "PASS  every API document declares the Keycloak OAuth2 scheme, Swagger UI and its OAuth2 redirect served"; } \
+                   || { FAIL=$((FAIL+1)); echo "FAIL  Swagger UI login: scheme missing or page not served"; }
 
 echo "== Profiles (user-service)"
 for n in 1 2 3 4; do
@@ -159,13 +183,15 @@ check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
 register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
 AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; echo "      cancel attendee 1 -> $CODE"
 register 3; check "register attendee 3 on freed seat" 201
-AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
-echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test)"
+# Started in a known trace: its log line is looked up in Loki below.
+LOG_TRACE_ID=$(openssl rand -hex 16)
+TRACEPARENT="00-$LOG_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
+echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test), trace $LOG_TRACE_ID"
 
 # Before the outage: these checks are about the content of traces, on a stable platform.
 # One request through gateway, registration-service and event-service (organizer lookup with the service
 # account): started in a known trace, which must reach Tempo with the spans of the three services.
-echo "== Distributed tracing (OpenTelemetry, Grafana Tempo)"
+echo "== Distributed tracing and logs (OpenTelemetry, Grafana Tempo and Loki)"
 TRACE_ID=$(openssl rand -hex 16)
 TRACEPARENT="00-$TRACE_ID-$(openssl rand -hex 8)-01" call GET "/api/registrations/events/$E"
 echo "      traced request -> $CODE, trace $TRACE_ID"
@@ -191,6 +217,45 @@ TRACEPARENT="00-$ERROR_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=none call GET /a
 [ "$CODE" = 404 ] && [ "$(field traceId)" = "$ERROR_TRACE_ID" ] \
   && { PASS=$((PASS+1)); echo "PASS  problem response carries the trace id -> $CODE $(field code)"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  problem trace id (expected $ERROR_TRACE_ID) -> $CODE body=$BODY"; }
+
+# The log of a request reaches Loki with the id of its trace: Grafana goes from a trace to its logs.
+logs_of_trace() {
+  curl -s -G http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode since=15m \
+    --data-urlencode "query={service_name=\"registration-service\"} | trace_id=\"$LOG_TRACE_ID\""
+}
+for i in $(seq 1 15); do LOGS=$(logs_of_trace); [[ "$LOGS" == *"cancelled on event"* ]] && break; sleep 2; done
+[[ "$LOGS" == *"cancelled on event"* ]] && { PASS=$((PASS+1)); echo "PASS  log of the request in Loki with its trace id"; } \
+                                     || { FAIL=$((FAIL+1)); echo "FAIL  no log for trace $LOG_TRACE_ID in Loki: ${LOGS:0:300}"; }
+
+# The dashboards are provisioned from the repository, and the metrics they read reach Prometheus with the names and
+# labels they use. Series, not rates: metrics are pushed every 10 s, a rate needs two pushes (a fast run has one).
+echo "== Dashboards (Grafana, Prometheus)"
+DASHBOARDS=$(curl -s "http://127.0.0.1:3000/api/search?tag=event-platform")
+metric_services() {
+  curl -s -G http://127.0.0.1:3000/api/datasources/proxy/uid/prometheus/api/v1/query \
+    --data-urlencode 'query=count by (service_name) (http_server_requests_milliseconds_count)' \
+    | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["data"]["result"]))' 2>/dev/null || echo 0
+}
+for i in $(seq 1 20); do SERVICES=$(metric_services); [ "$SERVICES" -ge 4 ] && break; sleep 2; done
+[[ "$DASHBOARDS" == *event-platform-services* && "$DASHBOARDS" == *event-platform-resilience* \
+   && "$DASHBOARDS" == *event-platform-business* && "$SERVICES" -ge 4 ]] \
+  && { PASS=$((PASS+1)); echo "PASS  dashboards provisioned, HTTP metrics of $SERVICES services in Prometheus"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  dashboards or metrics missing (services: $SERVICES) ${DASHBOARDS:0:200}"; }
+
+# Business metrics (registrations confirmed and rejected by reason, counted above) and the alert rules.
+prom_series() {
+  curl -s -G http://127.0.0.1:3000/api/datasources/proxy/uid/prometheus/api/v1/query --data-urlencode "query=$1" \
+    | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["data"]["result"]))' 2>/dev/null || echo 0
+}
+for i in $(seq 1 20); do
+  CONFIRMED=$(prom_series 'registrations_confirmed_total{service_name="registration-service"}')
+  FULL=$(prom_series 'registrations_rejected_total{service_name="registration-service",reason="EVENT_FULL"}')
+  [ "$CONFIRMED" -ge 1 ] && [ "$FULL" -ge 1 ] && break; sleep 2
+done
+RULES=$(curl -s http://127.0.0.1:3000/api/prometheus/grafana/api/v1/rules)
+[[ "$CONFIRMED" -ge 1 && "$FULL" -ge 1 && "$RULES" == *"Server errors above 5 %"* && "$RULES" == *"Circuit breaker rejecting calls"* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  business metrics (confirmed, rejected EVENT_FULL) and alert rules provisioned"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  business metrics ($CONFIRMED confirmed, $FULL EVENT_FULL) or alert rules: ${RULES:0:200}"; }
 
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
