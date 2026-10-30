@@ -2,6 +2,12 @@ package com.kmg.eventplatform.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -60,15 +66,32 @@ class GatewayApiDocsIT {
     }
 
     @Test
-    void swaggerUiSignsInWithKeycloak() {
-        ResponseEntity<String> config = get("/v3/api-docs/swagger-config");
-        // Keycloak redirects back to a page the gateway serves and permits (under /webjars)
-        assertThat(config.getBody()).contains(
-                "\"oauth2RedirectUrl\":\"http://localhost:8080/webjars/swagger-ui/oauth2-redirect.html\"");
-        assertThat(get("/webjars/swagger-ui/oauth2-redirect.html").getStatusCode()).isEqualTo(HttpStatus.OK);
+    void swaggerUiEntryPointLeadsToTheSignInReadyUi() throws Exception {
+        // What a browser does: /swagger-ui.html redirects to the UI, which must be served (not denied)
+        HttpResponse<Void> redirect = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/swagger-ui.html")).build(),
+                HttpResponse.BodyHandlers.discarding());
+        assertThat(redirect.statusCode()).isEqualTo(HttpStatus.FOUND.value());
+        String ui = URI.create(redirect.headers().firstValue("Location").orElseThrow()).getPath();
 
-        ResponseEntity<String> initializer = get("/webjars/swagger-ui/swagger-initializer.js");
-        assertThat(initializer.getBody()).contains("event-platform-web");
+        ResponseEntity<String> page = get(ui);
+        assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(page.getBody()).contains("swagger-ui");
+
+        // The UI initializes OAuth2 with the public client of the realm
+        String initializer = ui.substring(0, ui.lastIndexOf('/') + 1) + "swagger-initializer.js";
+        assertThat(get(initializer).getBody()).contains("event-platform-web");
+    }
+
+    @Test
+    void keycloakRedirectsBackToAServedPage() {
+        String config = get("/v3/api-docs/swagger-config").getBody();
+        Matcher redirectUrl = Pattern.compile("\"oauth2RedirectUrl\":\"([^\"]+)\"").matcher(config);
+        assertThat(redirectUrl.find()).isTrue();
+        String path = URI.create(redirectUrl.group(1)).getPath();
+
+        assertThat(path).endsWith("/oauth2-redirect.html");
+        assertThat(get(path).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     @Test

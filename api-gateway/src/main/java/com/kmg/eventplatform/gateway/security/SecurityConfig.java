@@ -22,7 +22,8 @@ class SecurityConfig {
 
     /** Swagger UI and the API docs it aggregates: documentation only, no data. */
     private static final String[] API_DOCS = {
-            "/swagger-ui.html", "/webjars/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**", "/api-docs/**"
+            "/swagger-ui.html", "/swagger-ui/**", "/webjars/swagger-ui/**",
+            "/v3/api-docs", "/v3/api-docs/**", "/api-docs/**"
     };
 
     @Bean

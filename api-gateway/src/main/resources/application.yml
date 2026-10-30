@@ -111,11 +111,9 @@ springdoc:
       - name: Registration
         url: /api-docs/registration-service
     # "Authorize": Keycloak sign-in with the public client of the realm (authorization code + PKCE, no secret).
-    # The documents declare the scheme (platform-security PlatformOpenApi).
-    # Keycloak redirects back to the page below, allowed by the client's http://localhost:8080/* redirect URIs.
-    # Set explicitly: on WebFlux springdoc computes /swagger-ui/oauth2-redirect.html, without the /webjars prefix
-    # the gateway serves the Swagger UI from. Absolute URL required (a relative one is replaced by the computed one).
-    oauth2-redirect-url: ${SWAGGER_UI_OAUTH2_REDIRECT_URL:http://localhost:8080/webjars/swagger-ui/oauth2-redirect.html}
+    # The documents declare the scheme (platform-security PlatformOpenApi). springdoc serves the UI under
+    # /swagger-ui/ and computes the OAuth2 redirect page from the request (/swagger-ui/oauth2-redirect.html),
+    # allowed by the client's http://localhost:8080/* redirect URIs.
     oauth:
       client-id: event-platform-web
       use-pkce-with-authorization-code-grant: true
