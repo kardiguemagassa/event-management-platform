@@ -144,6 +144,11 @@ Each request gets a trace, propagated with the W3C `traceparent` header from the
 
 Every endpoint is reached through the gateway, `http://localhost:8080`, and documented in a single Swagger UI:
 `http://localhost:8080/swagger-ui.html` (one definition per service).
+To call a protected endpoint from it, click **Authorize**, then **Authorize** again in the `keycloak` dialog and
+sign in with a Keycloak account: the Swagger UI uses the public client `event-platform-web` (authorization code
+with PKCE) and sends the access token on every "Try it out". The services' own Swagger UIs (for example
+`http://localhost:8083/swagger-ui/index.html`) show the scheme but cannot sign in: their address is not a redirect
+URI of the client.
 
 | Resource | Endpoints |
 |---|---|
@@ -216,8 +221,9 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (30 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (31 checks):
 
+- API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
@@ -313,8 +319,6 @@ pull request would change `main` directly and require merging `main` back into `
 - **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
   behind TLS, a fixed hostname and an external database for high availability.
 - **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console.
-- **Swagger UI cannot authenticate yet**: the bearer scheme is not declared in the OpenAPI documents, so "Try it out"
-  only works on public routes.
 - **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
 - **`otel-lgtm` is a development backend**: one container, no persistence, default Grafana account. Production would
   run a collector and the backends separately (or send OTLP to a vendor).
@@ -331,7 +335,6 @@ pull request would change `main` directly and require merging `main` back into `
 
 - **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
   cookie, token relay to the services), so that no token is ever stored in the browser.
-- **Swagger UI login**: OAuth2 security scheme in the OpenAPI documents, PKCE login from the Swagger UI.
 - **Observability**: Grafana dashboards on the exported metrics (latency, errors, circuit breaker states), logs
   shipped to Loki, trace id in the gateway's own errors.
 - **Reliability**: transactional outbox and messaging for the registration saga.

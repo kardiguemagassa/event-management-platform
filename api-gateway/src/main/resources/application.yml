@@ -110,6 +110,15 @@ springdoc:
         url: /api-docs/event-service
       - name: Registration
         url: /api-docs/registration-service
+    # "Authorize": Keycloak sign-in with the public client of the realm (authorization code + PKCE, no secret).
+    # The documents declare the scheme (platform-security PlatformOpenApi). springdoc serves the UI under
+    # /swagger-ui/ and computes the OAuth2 redirect page from the request (/swagger-ui/oauth2-redirect.html),
+    # allowed by the client's http://localhost:8080/* redirect URIs.
+    oauth:
+      client-id: event-platform-web
+      use-pkce-with-authorization-code-grant: true
+      scopes:
+        - openid
 
 eureka:
   client:

@@ -115,6 +115,23 @@ for route in /api/users/me /api/events /api/registrations/me; do
   case "$CODE" in 5*|000) echo "FAIL  the gateway does not route $route"; exit 1 ;; esac
 done
 
+echo "== API documentation (Swagger UI login)"
+# Each document declares the Keycloak scheme: the Swagger UI "Authorize" button signs in with it.
+DOCS_OK=1
+for service in user-service event-service registration-service; do
+  AUTH=none call GET "/api-docs/$service"
+  [[ "$CODE" = 200 && "$BODY" == *'"securitySchemes"'* && "$BODY" == *"/protocol/openid-connect/auth"* ]] \
+    || { DOCS_OK=0; echo "      $service -> $CODE ${BODY:0:200}"; }
+done
+# What a browser does: /swagger-ui.html leads to a served UI, and Keycloak redirects back to a served page.
+UI_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -L "$G/swagger-ui.html")
+AUTH=none call GET /v3/api-docs/swagger-config; REDIRECT_URL=$(field oauth2RedirectUrl)
+REDIRECT_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$REDIRECT_URL")
+[ "$UI_STATUS" = 200 ] && [ "$REDIRECT_STATUS" = 200 ] \
+  || { DOCS_OK=0; echo "      swagger-ui.html -> $UI_STATUS, $REDIRECT_URL -> $REDIRECT_STATUS"; }
+[ "$DOCS_OK" = 1 ] && { PASS=$((PASS+1)); echo "PASS  every API document declares the Keycloak OAuth2 scheme, Swagger UI and its OAuth2 redirect served"; } \
+                   || { FAIL=$((FAIL+1)); echo "FAIL  Swagger UI login: scheme missing or page not served"; }
+
 echo "== Profiles (user-service)"
 for n in 1 2 3 4; do
   AUTH=$(attendee_token "$n") call PUT /api/users/me "{\"fullName\":\"Attendee $n\"}"
