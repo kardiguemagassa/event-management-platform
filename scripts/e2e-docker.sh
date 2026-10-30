@@ -220,6 +220,16 @@ for i in $(seq 1 15); do LOGS=$(logs_of_trace); [[ "$LOGS" == *"cancelled on eve
 [[ "$LOGS" == *"cancelled on event"* ]] && { PASS=$((PASS+1)); echo "PASS  log of the request in Loki with its trace id"; } \
                                      || { FAIL=$((FAIL+1)); echo "FAIL  no log for trace $LOG_TRACE_ID in Loki: ${LOGS:0:300}"; }
 
+# The dashboards are provisioned from the repository, and their metrics exist: the request rate of the services.
+echo "== Dashboards (Grafana, Prometheus)"
+DASHBOARDS=$(curl -s "http://127.0.0.1:3000/api/search?tag=event-platform")
+SERVICES=$(curl -s -G http://127.0.0.1:3000/api/datasources/proxy/uid/prometheus/api/v1/query \
+  --data-urlencode 'query=sum by (service_name) (rate(http_server_requests_milliseconds_count[5m]))' \
+  | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["data"]["result"]))' 2>/dev/null)
+[[ "$DASHBOARDS" == *event-platform-services* && "$DASHBOARDS" == *event-platform-resilience* && "${SERVICES:-0}" -ge 4 ]] \
+  && { PASS=$((PASS+1)); echo "PASS  dashboards provisioned, request rate of $SERVICES services"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  dashboards or metrics missing (services: ${SERVICES:-0}) ${DASHBOARDS:0:200}"; }
+
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
 for i in $(seq 1 12); do register 4; echo "      #$i -> $CODE $(field code) ${TIME}s"; done

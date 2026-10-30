@@ -1,0 +1,11 @@
+# Grafana provisioning of the platform's dashboards, mounted into otel-lgtm (compose.yaml).
+# The dashboards are code: edited here, reviewed in pull requests, loaded at startup; read-only in Grafana.
+apiVersion: 1
+providers:
+  - name: event-platform
+    folder: Event Platform
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/event-platform

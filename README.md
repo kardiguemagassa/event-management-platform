@@ -143,7 +143,15 @@ to `grafana/otel-lgtm`:
 - **Errors**: every problem answered by a service carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
-- **Metrics**: exported over OTLP to Prometheus as well (dashboards on the roadmap).
+- **Metrics**: exported over OTLP to Prometheus. Two dashboards, versioned in `observability/grafana/dashboards` and
+  provisioned at startup (Grafana, **Dashboards**, folder **Event Platform**; read-only, edited in the repository):
+  - **Services**: request rate, 5xx rate, latency p95 and p99 per service, slowest routes, responses by status, heap,
+    CPU, GC, database connections (Hikari);
+  - **Resilience**: state of every circuit breaker over time (closed, half-open, open), failure rate, calls rejected
+    while open, gateway fallbacks and timeouts, downstream calls of `registration-service`.
+
+  Stop `event-service` (`docker compose stop event-service`) and call the API: the breakers open on the Resilience
+  dashboard, then close once it is back.
 
 ## API
 
@@ -226,7 +234,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (32 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (33 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
@@ -238,7 +246,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (32 c
   and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
   `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
-  reaches Loki with its trace id.
+  reaches Loki with its trace id;
+- dashboards: both are provisioned in Grafana and the request rate of the services is found in Prometheus.
 
 ### Docker setup at a glance
 
@@ -341,8 +350,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 - **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
   cookie, token relay to the services), so that no token is ever stored in the browser.
-- **Observability**: Grafana dashboards on the exported metrics (latency, errors, circuit breaker states), business
-  metrics and alerts, trace id in the gateway's own errors.
+- **Observability**: business metrics and alerts, trace id in the gateway's own errors.
 - **Keycloak login theme**: the sign-in and registration pages styled like the Angular front-end (Keycloakify or a
   FreeMarker/CSS theme), still served by Keycloak.
 - **Reliability**: transactional outbox and messaging for the registration saga.
