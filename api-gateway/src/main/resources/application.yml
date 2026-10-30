@@ -155,6 +155,8 @@ management:
     metrics:
       export:
         url: ${OTEL_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
+        # Push interval: 1 minute by default (production), 10 s in compose for live dashboards.
+        step: ${OTEL_METRICS_STEP:1m}
 
 gateway:
   # One breaker per route, all sharing these settings; every routing error counts as a failure.

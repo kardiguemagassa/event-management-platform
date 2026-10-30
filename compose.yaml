@@ -26,6 +26,7 @@ x-spring-environment: &spring-environment
   OTEL_TRACES_ENDPOINT: http://otel-lgtm:4318/v1/traces
   OTEL_METRICS_ENDPOINT: http://otel-lgtm:4318/v1/metrics
   OTEL_LOGS_ENDPOINT: http://otel-lgtm:4318/v1/logs
+  OTEL_METRICS_STEP: 10s
 
 x-healthcheck-timing: &healthcheck-timing
   interval: 5s

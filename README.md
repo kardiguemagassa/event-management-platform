@@ -150,8 +150,11 @@ to `grafana/otel-lgtm`:
   - **Resilience**: state of every circuit breaker over time (closed, half-open, open), failure rate, calls rejected
     while open, gateway fallbacks and timeouts, downstream calls of `registration-service`.
 
-  Stop `event-service` (`docker compose stop event-service`) and call the API: the breakers open on the Resilience
-  dashboard, then close once it is back.
+  Metrics are pushed every 10 s in compose (`OTEL_METRICS_STEP`), every minute by default.
+
+  A stopped service leaves discovery within seconds: callers then fail fast without calling it, and the breakers ignore
+  that case by design (no request was sent), so they stay closed. To see a breaker open, make the service hang instead:
+  `docker compose pause event-service`, register a few times, then `docker compose unpause event-service`.
 
 ## API
 
@@ -242,7 +245,7 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (33 c
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
   attendee cancelling a registration (`404`);
 - business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation;
-- resilience: `event-service` outage (fast `503` once the circuit is open, gateway fallback), recovery after restart,
+- resilience: `event-service` outage (fast `503` once the instance has left discovery, gateway fallback), recovery after restart,
   and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
   `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
