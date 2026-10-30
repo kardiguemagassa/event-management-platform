@@ -158,7 +158,9 @@ to `grafana/otel-lgtm`:
   that case by design (no request was sent), so they stay closed. To see a breaker open, make the service hang instead:
   `docker compose pause event-service`, register a few times, then `docker compose unpause event-service`.
 - **Alerts** (`observability/grafana/alerting.yaml`, Grafana **Alerting**): more than 5 % of 5xx on a service for
-  2 minutes, a circuit breaker not closed for 1 minute. No contact point in development; production would route them
+  2 minutes, calls rejected by an open circuit breaker for 2 minutes (a sustained outage under traffic). A
+  half-open breaker alone is not alerted: without traffic it stays half-open after the downstream has recovered,
+  which is not an incident. No contact point in development; production would route them
   to the on-call channel.
 
 ## API

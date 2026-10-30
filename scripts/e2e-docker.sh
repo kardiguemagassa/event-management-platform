@@ -110,9 +110,16 @@ echo "      test users and client ready"
 # Healthy containers are not routable yet: the gateway must first see each service in Eureka.
 # Routed means answered by the service itself: any status but a 5xx (gateway fallback) or no answer at all.
 echo "== Waiting for the gateway to route every service"
+# Three answers in a row: a single one passed while the gateway breaker was still recording startup failures, and
+# the scenario then hit its fallback (issue #37).
 for route in /api/users/me /api/events /api/registrations/me; do
-  for i in $(seq 1 60); do call GET "$route"; case "$CODE" in 5*|000) sleep 2 ;; *) break ;; esac; done
-  case "$CODE" in 5*|000) echo "FAIL  the gateway does not route $route"; exit 1 ;; esac
+  ROUTED=0
+  for i in $(seq 1 120); do
+    call GET "$route"
+    case "$CODE" in 5*|000) ROUTED=0 ;; *) ROUTED=$((ROUTED+1)) ;; esac
+    [ "$ROUTED" -ge 3 ] && break; sleep 1
+  done
+  [ "$ROUTED" -ge 3 ] || { echo "FAIL  the gateway does not route $route steadily (last: $CODE)"; exit 1; }
 done
 
 echo "== API documentation (Swagger UI login)"
@@ -246,7 +253,7 @@ for i in $(seq 1 20); do
   [ "$CONFIRMED" -ge 1 ] && [ "$FULL" -ge 1 ] && break; sleep 2
 done
 RULES=$(curl -s http://127.0.0.1:3000/api/prometheus/grafana/api/v1/rules)
-[[ "$CONFIRMED" -ge 1 && "$FULL" -ge 1 && "$RULES" == *"Server errors above 5 %"* && "$RULES" == *"Circuit breaker not closed"* ]] \
+[[ "$CONFIRMED" -ge 1 && "$FULL" -ge 1 && "$RULES" == *"Server errors above 5 %"* && "$RULES" == *"Circuit breaker rejecting calls"* ]] \
   && { PASS=$((PASS+1)); echo "PASS  business metrics (confirmed, rejected EVENT_FULL) and alert rules provisioned"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  business metrics ($CONFIRMED confirmed, $FULL EVENT_FULL) or alert rules: ${RULES:0:200}"; }
 
