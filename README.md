@@ -143,18 +143,23 @@ to `grafana/otel-lgtm`:
 - **Errors**: every problem answered by a service carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
-- **Metrics**: exported over OTLP to Prometheus. Two dashboards, versioned in `observability/grafana/dashboards` and
+- **Metrics**: exported over OTLP to Prometheus. Three dashboards, versioned in `observability/grafana/dashboards` and
   provisioned at startup (Grafana, **Dashboards**, folder **Event Platform**; read-only, edited in the repository):
   - **Services**: request rate, 5xx rate, latency p95 and p99 per service, slowest routes, responses by status, heap,
     CPU, GC, database connections (Hikari);
   - **Resilience**: state of every circuit breaker over time (closed, half-open, open), failure rate, calls rejected
-    while open, gateway fallbacks and timeouts, downstream calls of `registration-service`.
+    while open, gateway fallbacks and timeouts, downstream calls of `registration-service`;
+  - **Business**: registrations confirmed, cancelled and rejected by reason (`EVENT_FULL`, `ALREADY_REGISTERED`...),
+    counted by `registration-service` (`registrations_*_total`).
 
   Metrics are pushed every 10 s in compose (`OTEL_METRICS_STEP`), every minute by default.
 
   A stopped service leaves discovery within seconds: callers then fail fast without calling it, and the breakers ignore
   that case by design (no request was sent), so they stay closed. To see a breaker open, make the service hang instead:
   `docker compose pause event-service`, register a few times, then `docker compose unpause event-service`.
+- **Alerts** (`observability/grafana/alerting.yaml`, Grafana **Alerting**): more than 5 % of 5xx on a service for
+  2 minutes, a circuit breaker not closed for 1 minute. No contact point in development; production would route them
+  to the on-call channel.
 
 ## API
 
@@ -237,7 +242,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (33 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (34 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
@@ -250,8 +255,10 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (33 c
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
   `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
   reaches Loki with its trace id;
-- dashboards: both are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
+- dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
   dashboards read, are found in Prometheus.
+- business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, and both
+  alert rules are loaded in Grafana.
 
 ### Docker setup at a glance
 
@@ -354,7 +361,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 - **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
   cookie, token relay to the services), so that no token is ever stored in the browser.
-- **Observability**: business metrics and alerts, trace id in the gateway's own errors.
+- **Observability**: trace id in the gateway's own errors, alert routing to an on-call channel.
 - **Keycloak login theme**: the sign-in and registration pages styled like the Angular front-end (Keycloakify or a
   FreeMarker/CSS theme), still served by Keycloak.
 - **Reliability**: transactional outbox and messaging for the registration saga.

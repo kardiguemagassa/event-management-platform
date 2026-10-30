@@ -33,15 +33,34 @@ public class RegistrationService {
     private final RegistrationRepository repository;
     private final EventCatalog events;
     private final Clock clock;
+    private final RegistrationMetrics metrics;
 
-    public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock) {
+    public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock,
+                               RegistrationMetrics metrics) {
         this.repository = repository;
         this.events = events;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
-    /** @param userId the authenticated attendee, from the access token */
+    /**
+     * Counted: confirmed, or rejected with the code of the failure (event full, already registered, downstream
+     * unavailable...).
+     *
+     * @param userId the authenticated attendee, from the access token
+     */
     public Registration register(UUID eventId, UUID userId) {
+        try {
+            Registration confirmed = confirm(eventId, userId);
+            metrics.confirmed();
+            return confirmed;
+        } catch (RegistrationFailureException rejected) {
+            metrics.rejected(rejected.code());
+            throw rejected;
+        }
+    }
+
+    private Registration confirm(UUID eventId, UUID userId) {
         if (!events.exists(eventId)) {
             throw new EventNotFoundException(eventId);
         }
@@ -81,6 +100,7 @@ public class RegistrationService {
         events.releaseSeat(registration.getEventId(), registration.getId());
         registration.cancel(clock.instant());
         Registration cancelled = repository.saveAndFlush(registration);
+        metrics.cancelled();
         log.info("Registration {} cancelled on event {}", registrationId, registration.getEventId());
         return cancelled;
     }
