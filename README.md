@@ -250,7 +250,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (33 c
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
   `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
   reaches Loki with its trace id;
-- dashboards: both are provisioned in Grafana and the request rate of the services is found in Prometheus.
+- dashboards: both are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
+  dashboards read, are found in Prometheus.
 
 ### Docker setup at a glance
 
