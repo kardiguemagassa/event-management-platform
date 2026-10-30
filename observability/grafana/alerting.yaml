@@ -1,0 +1,73 @@
+# Grafana alert rules of the platform, provisioned at startup (mounted into otel-lgtm by compose.yaml).
+# Evaluated by Grafana every 30 s and shown in Alerting > Alert rules. No contact point is configured in development:
+# production would route them to the on-call channel (Slack, PagerDuty, e-mail).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: event-platform
+    folder: Event Platform
+    interval: 30s
+    rules:
+      - uid: event-platform-server-errors
+        title: Server errors above 5 %
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                100 * sum by (service_name) (rate(http_server_requests_milliseconds_count{status=~"5.."}[2m]))
+                / sum by (service_name) (rate(http_server_requests_milliseconds_count[2m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [5] }
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5 % of the requests of {{ $labels.service_name }} end in a 5xx
+          description: >-
+            Server errors for 2 minutes. Open the Services dashboard, then the traces of the failed requests
+            (status 5xx) in Tempo; the problem responses carry their traceId.
+          runbook_url: /d/event-platform-services
+
+      - uid: event-platform-circuit-not-closed
+        title: Circuit breaker not closed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max by (service_name, name) (resilience4j_circuitbreaker_state{state=~"open|half_open|forced_open"})
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Circuit {{ $labels.service_name }} -> {{ $labels.name }} is not closed
+          description: >-
+            Calls to {{ $labels.name }} fail fast (open) or are being trialled (half-open) for 1 minute: the downstream
+            service is down or too slow. See the Resilience dashboard.
+          runbook_url: /d/event-platform-resilience

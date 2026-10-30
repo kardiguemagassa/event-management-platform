@@ -230,9 +230,25 @@ metric_services() {
     | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["data"]["result"]))' 2>/dev/null || echo 0
 }
 for i in $(seq 1 20); do SERVICES=$(metric_services); [ "$SERVICES" -ge 4 ] && break; sleep 2; done
-[[ "$DASHBOARDS" == *event-platform-services* && "$DASHBOARDS" == *event-platform-resilience* && "$SERVICES" -ge 4 ]] \
+[[ "$DASHBOARDS" == *event-platform-services* && "$DASHBOARDS" == *event-platform-resilience* \
+   && "$DASHBOARDS" == *event-platform-business* && "$SERVICES" -ge 4 ]] \
   && { PASS=$((PASS+1)); echo "PASS  dashboards provisioned, HTTP metrics of $SERVICES services in Prometheus"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  dashboards or metrics missing (services: $SERVICES) ${DASHBOARDS:0:200}"; }
+
+# Business metrics (registrations confirmed and rejected by reason, counted above) and the alert rules.
+prom_series() {
+  curl -s -G http://127.0.0.1:3000/api/datasources/proxy/uid/prometheus/api/v1/query --data-urlencode "query=$1" \
+    | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["data"]["result"]))' 2>/dev/null || echo 0
+}
+for i in $(seq 1 20); do
+  CONFIRMED=$(prom_series 'registrations_confirmed_total{service_name="registration-service"}')
+  FULL=$(prom_series 'registrations_rejected_total{service_name="registration-service",reason="EVENT_FULL"}')
+  [ "$CONFIRMED" -ge 1 ] && [ "$FULL" -ge 1 ] && break; sleep 2
+done
+RULES=$(curl -s http://127.0.0.1:3000/api/prometheus/grafana/api/v1/rules)
+[[ "$CONFIRMED" -ge 1 && "$FULL" -ge 1 && "$RULES" == *"Server errors above 5 %"* && "$RULES" == *"Circuit breaker not closed"* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  business metrics (confirmed, rejected EVENT_FULL) and alert rules provisioned"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  business metrics ($CONFIRMED confirmed, $FULL EVENT_FULL) or alert rules: ${RULES:0:200}"; }
 
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
