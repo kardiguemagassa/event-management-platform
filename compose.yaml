@@ -26,6 +26,7 @@ x-spring-environment: &spring-environment
   OTEL_TRACES_ENDPOINT: http://otel-lgtm:4318/v1/traces
   OTEL_METRICS_ENDPOINT: http://otel-lgtm:4318/v1/metrics
   OTEL_LOGS_ENDPOINT: http://otel-lgtm:4318/v1/logs
+  OTEL_METRICS_STEP: 10s
 
 x-healthcheck-timing: &healthcheck-timing
   interval: 5s
@@ -143,6 +144,10 @@ services:
       - "127.0.0.1:4318:4318"                     # OTLP over HTTP, for services started from the IDE
       - "127.0.0.1:3200:3200"                     # Tempo API: traces by id (end-to-end test)
       - "127.0.0.1:3100:3100"                     # Loki API: logs of a trace (end-to-end test)
+    # The platform's dashboards (observability/grafana), provisioned at startup in the "Event Platform" folder.
+    volumes:
+      - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform.yaml:ro
+      - ./observability/grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform:ro
 
   discovery-server:
     <<: *spring-service

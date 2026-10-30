@@ -96,6 +96,8 @@ management:
     metrics:
       export:
         url: ${OTEL_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
+        # Push interval: 1 minute by default (production), 10 s in compose for live dashboards.
+        step: ${OTEL_METRICS_STEP:1m}
 
 springdoc:
   api-docs:
