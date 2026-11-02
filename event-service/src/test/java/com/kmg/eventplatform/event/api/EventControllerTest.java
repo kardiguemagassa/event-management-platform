@@ -24,6 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.kmg.eventplatform.event.application.EventNotFoundException;
+import com.kmg.eventplatform.event.application.EventSearch;
 import com.kmg.eventplatform.event.application.EventService;
 import com.kmg.eventplatform.event.application.NotEventOrganizerException;
 import com.kmg.eventplatform.event.domain.CapacityBelowReservedException;
@@ -36,7 +37,10 @@ import com.kmg.eventplatform.event.domain.InvalidEventStateException;
 import com.kmg.eventplatform.event.infrastructure.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -223,7 +227,7 @@ class EventControllerTest {
 
     @Test
     void listDefaultsToAllEventsSortedByStartAtAscending() throws Exception {
-        when(service.list(isNull(), eq(ORGANIZER), any())).thenAnswer(invocation ->
+        when(service.list(eq(EventSearch.all()), eq(ORGANIZER), any())).thenAnswer(invocation ->
                 new PageImpl<>(List.of(event()), invocation.getArgument(2), 1));
 
         mockMvc.perform(get("/api/events"))
@@ -232,29 +236,101 @@ class EventControllerTest {
                 .andExpect(jsonPath("$.size").value(20));
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(service).list(isNull(), eq(ORGANIZER), pageable.capture());
+        verify(service).list(eq(EventSearch.all()), eq(ORGANIZER), pageable.capture());
         assertThat(pageable.getValue().getSort().getOrderFor("startAt").getDirection())
                 .isEqualTo(Sort.Direction.ASC);
     }
 
     @Test
-    void listFiltersByStatus() throws Exception {
-        when(service.list(eq(EventStatus.PUBLISHED), eq(ORGANIZER), any())).thenAnswer(invocation ->
+    void listPassesEveryFilterToTheService() throws Exception {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        when(service.list(any(), eq(ORGANIZER), any())).thenAnswer(invocation ->
                 new PageImpl<>(List.of(), invocation.getArgument(2), 0));
 
-        mockMvc.perform(get("/api/events").param("status", "PUBLISHED"))
+        mockMvc.perform(get("/api/events")
+                        .param("status", "PUBLISHED")
+                        .param("q", "  Paris ")
+                        .param("from", "2026-12-01T00:00:00Z")
+                        .param("organizer", "me")
+                        .param("ids", first + "," + second + "," + first))
                 .andExpect(status().isOk());
 
-        verify(service).list(eq(EventStatus.PUBLISHED), eq(ORGANIZER), any());
+        ArgumentCaptor<EventSearch> search = ArgumentCaptor.forClass(EventSearch.class);
+        verify(service).list(search.capture(), eq(ORGANIZER), any());
+        assertThat(search.getValue()).isEqualTo(new EventSearch(EventStatus.PUBLISHED, "Paris",
+                Instant.parse("2026-12-01T00:00:00Z"), true, Set.of(first, second)));
+    }
+
+    @Test
+    void anonymousCallerBrowsesTheCatalogWithFilters() throws Exception {
+        when(service.list(any(), isNull(), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(), invocation.getArgument(2), 0));
+
+        anonymous.perform(get("/api/events").param("q", "kafka"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void ownEventsRequireAToken() throws Exception {
+        anonymous.perform(get("/api/events").param("organizer", "me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void ownEventsRequireTheOrganizerRole() throws Exception {
+        anonymous.perform(get("/api/events").param("organizer", "me").with(caller(UUID.randomUUID(), "ATTENDEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        verifyNoInteractions(service);
     }
 
     @Test
     void listRejectsUnknownStatus() throws Exception {
         mockMvc.perform(get("/api/events").param("status", "OPEN"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.status").exists());
 
-        verify(service, never()).list(any(), any(), any());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void listRejectsMalformedFromAndIds() throws Exception {
+        mockMvc.perform(get("/api/events").param("from", "tomorrow"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.from").exists());
+        mockMvc.perform(get("/api/events").param("ids", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.ids").exists());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void listRejectsInvalidFilters() throws Exception {
+        String tooManyIds = IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID().toString())
+                .collect(Collectors.joining(","));
+
+        mockMvc.perform(get("/api/events").param("organizer", "someone-else"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.organizer").exists());
+        mockMvc.perform(get("/api/events").param("ids", tooManyIds))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.ids").exists());
+        mockMvc.perform(get("/api/events").param("q", "x".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.q").exists());
+
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -263,7 +339,7 @@ class EventControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SORT_PROPERTY"));
 
-        verify(service, never()).list(any(), any(), any());
+        verifyNoInteractions(service);
     }
 
     @Test

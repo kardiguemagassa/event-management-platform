@@ -1,13 +1,23 @@
 package com.kmg.eventplatform.event.application;
 
+import static com.kmg.eventplatform.event.domain.EventSpecifications.hasStatus;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.idIn;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.organizedBy;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.startsAtOrAfter;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.titleOrLocationContains;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.visibleTo;
+
 import com.kmg.eventplatform.event.domain.Event;
 import com.kmg.eventplatform.event.domain.EventDetails;
 import com.kmg.eventplatform.event.domain.EventRepository;
-import com.kmg.eventplatform.event.domain.EventStatus;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,23 +59,31 @@ public class EventService {
     }
 
     /**
-     * Events visible to the viewer: every published or cancelled event, plus the viewer's own drafts.
+     * Events matching the search, among those visible to the viewer: every published or cancelled event, plus the
+     * viewer's own drafts. With {@link EventSearch#mine()}, every event of the viewer and only those.
      *
-     * @param status   optional filter, {@code null} for all visible events
-     * @param viewerId the caller, {@code null} when anonymous
+     * @param viewerId the caller, {@code null} when anonymous (never with {@code mine})
      */
-    public Page<Event> list(EventStatus status, UUID viewerId, Pageable pageable) {
-        if (status == null) {
-            return viewerId == null
-                    ? repository.findByStatusNot(EventStatus.DRAFT, pageable)
-                    : repository.findVisibleTo(viewerId, EventStatus.DRAFT, pageable);
+    public Page<Event> list(EventSearch search, UUID viewerId, Pageable pageable) {
+        List<Specification<Event>> criteria = new ArrayList<>();
+        if (search.mine()) {
+            criteria.add(organizedBy(Objects.requireNonNull(viewerId, "mine requires an authenticated caller")));
+        } else {
+            criteria.add(visibleTo(viewerId));
         }
-        if (status == EventStatus.DRAFT) {
-            return viewerId == null
-                    ? Page.empty(pageable)
-                    : repository.findByStatusAndOrganizerId(EventStatus.DRAFT, viewerId, pageable);
+        if (search.status() != null) {
+            criteria.add(hasStatus(search.status()));
         }
-        return repository.findByStatus(status, pageable);
+        if (search.text() != null) {
+            criteria.add(titleOrLocationContains(search.text()));
+        }
+        if (search.from() != null) {
+            criteria.add(startsAtOrAfter(search.from()));
+        }
+        if (search.ids() != null) {
+            criteria.add(idIn(search.ids()));
+        }
+        return repository.findAll(Specification.allOf(criteria), pageable);
     }
 
     @Transactional
