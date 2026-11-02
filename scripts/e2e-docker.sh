@@ -184,6 +184,16 @@ call GET "/api/events?organizer=me&status=DRAFT"; check "organizer lists their o
 AUTH=$(attendee_token 1) call GET "/api/events?organizer=me"; check "own events need the ORGANIZER role" 403 ACCESS_DENIED
 AUTH=none call GET "/api/events?from=tomorrow"; check "malformed filter" 400 VALIDATION_FAILED
 
+# The web application (nginx) is the browser's single origin: it serves the Angular build and relays the gateway paths.
+echo "== Web application (nginx, same origin as the API)"
+W=http://127.0.0.1:4200
+headers=$(curl -s -D - -o /tmp/e2e-web.html "$W/catalogue?q=paris")
+grep -q '<app-root' /tmp/e2e-web.html && echo "$headers" | grep -qi "^content-security-policy: default-src 'self'" \
+  && { PASS=$((PASS+1)); echo "PASS  application served on every client-side route, with its CSP"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  web application not served: $(echo "$headers" | head -1)"; }
+G=$W AUTH=none call GET /bff/me; check "session endpoint relayed to the gateway" 401
+G=$W AUTH=none call GET "/api/events/$E"; check "API relayed to the gateway" 200
+
 # What a browser does, scripted: sign in on the Keycloak page through the gateway (BFF), then call the API with the
 # session cookie only. On localhost: the address registered as redirect URI of the event-platform-bff client.
 echo "== Browser session (BFF)"

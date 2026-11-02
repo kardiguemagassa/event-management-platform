@@ -272,6 +272,28 @@ services:
       <<: *healthcheck-timing
       test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health/readiness"]
 
+  # Web application (Angular, served by nginx), the browser's single origin: it relays /api, /bff and the OAuth2
+  # login paths to the gateway. http://localhost:4200 is a registered redirect URI of the event-platform-bff client.
+  web:
+    profiles: [app]
+    restart: unless-stopped
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-web:${IMAGE_TAG:-dev}
+    build:
+      context: frontend
+    ports:
+      - "127.0.0.1:4200:8080"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    healthcheck:
+      <<: *healthcheck-timing
+      start_period: 5s
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+
 volumes:
   user-db-data:
   event-db-data:

@@ -1,0 +1,526 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "User Service API",
+    "description": "Application profiles of the users; identity (credentials, e-mail, roles) is managed by Keycloak. Errors follow RFC 9457 and carry a stable `code`.",
+    "version": "0.0.0-SNAPSHOT"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "security": [
+    {
+      "keycloak": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Users",
+      "description": "Application profiles of the users (identity is managed by Keycloak)"
+    }
+  ],
+  "paths": {
+    "/api/users/me": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get the caller's profile",
+        "description": "404 until the profile is saved once (PUT).",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "Profile found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Create or update the caller's profile",
+        "description": "Idempotent. The e-mail is copied from the access token on every save.",
+        "operationId": "saveMe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Profile created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Profile updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Delete the caller's profile",
+        "description": "Right to erasure: the application profile only, the Keycloak account stays.",
+        "operationId": "deleteMe",
+        "responses": {
+          "204": {
+            "description": "Profile deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "List users",
+        "description": "Requires the ADMIN role. Paginated (default size 20, max 100). Sortable by: createdAt (default, desc), fullName, email.",
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Zero-based page index (0..N)",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "The size of the page to be returned",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "createdAt,DESC"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get a user by id",
+        "description": "Requires the ADMIN role.",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Delete a user's profile",
+        "description": "Requires the ADMIN role.",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "User deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/users/names": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Display names of users",
+        "description": "Internal: requires the PROFILE_READER role (service account of registration-service), closed at the gateway. Users without a profile are left out; no e-mail is returned.",
+        "operationId": "names",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "User ids, comma-separated (max 100)",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Names of the users found, in no particular order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserNameResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProblemDetail": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "about:blank"
+          },
+          "title": {
+            "type": "string",
+            "example": "User not found"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "example": 404
+          },
+          "detail": {
+            "type": "string",
+            "example": "User 3f2b8c1e-\u2026 not found"
+          },
+          "instance": {
+            "type": "string",
+            "example": "/api/users/3f2b8c1e-\u2026"
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code",
+            "example": "USER_NOT_FOUND"
+          }
+        }
+      },
+      "ProfileRequest": {
+        "required": [
+          "fullName"
+        ],
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "maxLength": 100,
+            "minLength": 0,
+            "type": "string"
+          }
+        }
+      },
+      "UserResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PageResponseUserResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "UserNameResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fullName": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request (validation, malformed JSON, invalid sort, no e-mail in the token)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Validation failed",
+              "status": 400,
+              "detail": "One or more fields are invalid",
+              "instance": "/api/users/me",
+              "code": "VALIDATION_FAILED",
+              "errors": {
+                "fullName": "must not be blank"
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Profile not found (not saved yet, or deleted)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "User not found",
+              "status": 404,
+              "detail": "User 4b5aa969-\u2026 not found",
+              "instance": "/api/users/me",
+              "code": "USER_NOT_FOUND"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Conflict (email already used, concurrent modification)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Email already used",
+              "status": 409,
+              "detail": "Email jane@example.com is already used",
+              "instance": "/api/users/me",
+              "code": "EMAIL_ALREADY_USED"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, invalid or expired access token",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Unauthorized",
+              "status": 401,
+              "detail": "A valid access token is required",
+              "instance": "/api/\u2026",
+              "code": "UNAUTHENTICATED"
+            }
+          }
+        }
+      },
+      "AccessDenied": {
+        "description": "The caller's roles do not allow this operation",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Forbidden",
+              "status": 403,
+              "detail": "You are not allowed to access this resource",
+              "instance": "/api/\u2026",
+              "code": "ACCESS_DENIED"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "keycloak": {
+        "type": "oauth2",
+        "description": "Keycloak sign-in (authorization code with PKCE)",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "http://localhost:8180/realms/event-platform/protocol/openid-connect/auth",
+            "tokenUrl": "http://localhost:8180/realms/event-platform/protocol/openid-connect/token",
+            "scopes": {
+              "openid": "OpenID Connect sign-in"
+            }
+          }
+        }
+      }
+    }
+  }
+}

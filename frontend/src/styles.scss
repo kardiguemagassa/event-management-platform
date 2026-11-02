@@ -1,0 +1,62 @@
+// Material 3 theme from the mockups' palette (primary indigo #4338CA, tertiary teal), fonts self-hosted:
+// no request to a third-party font CDN (privacy, and the CSP keeps every resource on our own origin).
+@use '@angular/material' as mat;
+@use './styles/theme-colors' as theme;
+
+html {
+  height: 100%;
+  @include mat.theme(
+    (
+      color: (
+        primary: theme.$primary-palette,
+        tertiary: theme.$tertiary-palette,
+      ),
+      typography: (
+        plain-family: 'Inter Variable',
+        brand-family: 'Plus Jakarta Sans Variable',
+      ),
+      density: 0,
+    )
+  );
+  // The exact brand colour of the mockups for filled buttons and accents (the generated tone 40 is lighter).
+  @include mat.theme-overrides(
+    (
+      primary: #4338ca,
+    )
+  );
+}
+
+body {
+  color-scheme: light;
+  background-color: #f6f7fb;
+  color: var(--mat-sys-on-surface);
+  font: var(--mat-sys-body-medium);
+  margin: 0;
+  height: 100%;
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Plus Jakarta Sans Variable', 'Inter Variable', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+a {
+  color: var(--mat-sys-primary);
+}
+
+// Visible keyboard focus everywhere (WCAG 2.4.7).
+:focus-visible {
+  outline: 2px solid var(--mat-sys-primary);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -12,6 +12,7 @@ GitHub Actions.
 
 | Service | Responsibility |
 |---|---|
+| `web` | Angular application served by nginx (`http://localhost:4200`), the browser's single origin: it relays `/api`, `/bff` and the login paths to the gateway |
 | `api-gateway` | Single entry point: token validation, routing, circuit breakers with fallback, one Swagger UI for every service |
 | `discovery-server` | Eureka registry: services find each other by name |
 | `user-service` | Application profiles of the users (`/api/users/me`), keyed by their Keycloak id |
@@ -26,10 +27,12 @@ GitHub Actions.
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|"login :8180"| keycloak
-    client -->|"Bearer token :8080"| gateway
+    browser([Browser]) -->|":4200"| web
+    browser -->|"login :8180"| keycloak
+    client([API client]) -->|"Bearer token :8080"| gateway
 
     subgraph platform ["Docker network: default"]
+        web["web<br/>Angular, nginx"]
         keycloak["keycloak<br/>realm event-platform"]
         gateway["api-gateway<br/>Spring Cloud Gateway"]
         eureka["discovery-server<br/>Eureka"]
@@ -38,6 +41,7 @@ flowchart LR
         registrations[registration-service]
     end
 
+    web -->|"/api, /bff, login<br/>(session cookie)"| gateway
     gateway -->|"token relayed"| users & events & registrations
     registrations -->|"service account token:<br/>event, organizer, reserve / release seat"| events
     registrations -.->|"client credentials"| keycloak
@@ -52,7 +56,8 @@ flowchart LR
     gateway & users & events & registrations -.->|"register, discover"| eureka
 ```
 
-Each database sits on a private network shared with its own service only. Only the gateway (8080), Keycloak (8180),
+Each database sits on a private network shared with its own service only. Only the web application (4200), the
+gateway (8080), Keycloak (8180),
 Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200) publish a port, bound to
 `127.0.0.1`. Every service sends its traces and metrics to the collector over OTLP (not drawn).
 
@@ -66,7 +71,8 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | API | REST, RFC 9457 problem details, OpenAPI 3 (springdoc), Bean Validation |
 | Security | Keycloak 26 (OpenID Connect), Spring Security 7: OAuth2 resource server (JWT, RS256) and OAuth2 client (client credentials) |
 | Observability | OpenTelemetry (Spring Boot starter, Micrometer Tracing), W3C trace context, OTLP; Grafana, Tempo, Prometheus, Loki (`grafana/otel-lgtm`) in development |
-| Tests | JUnit 5, AssertJ, Mockito, Testcontainers, JaCoCo |
+| Web application | Angular 22 (standalone components, signals, zoneless), Angular Material 3, API client generated from the OpenAPI documents (`ng-openapi-gen`), nginx |
+| Tests | JUnit 5, AssertJ, Mockito, Testcontainers, JaCoCo; Vitest for the web application |
 | Delivery | Docker (multi-stage, multi-platform), Docker Compose, GitHub Actions, Trivy, Dependabot |
 
 ## Design decisions
@@ -243,11 +249,12 @@ a change of that file, recreate its volume (`docker volume rm event-platform_key
 
 ```bash
 docker compose --profile app up -d --build
-docker compose --profile app ps          # wait until the 11 containers are (healthy)
+docker compose --profile app ps          # wait until the 12 containers are (healthy)
 ```
 
 | URL                                     | Purpose                                            |
 |-----------------------------------------|----------------------------------------------------|
+| `http://localhost:4200`                 | Web application (sign in with a realm user)        |
 | `http://localhost:8080`                 | API Gateway, the single entry point                |
 | `http://localhost:8080/swagger-ui.html` | Swagger UI of all services (Select a definition)   |
 | `http://localhost:8761`                 | Eureka dashboard                                   |
@@ -266,6 +273,12 @@ Then start `discovery-server` first, followed by the other services. The aggrega
 (`http://localhost:8080/swagger-ui.html`), and each service also serves its own, for example
 `http://localhost:8083/swagger-ui/index.html`.
 
+The web application in development, with live reload (gateway on `localhost:8080`, Node.js 24):
+
+```bash
+cd frontend && npm ci && npm start       # http://localhost:4200, /api, /bff and the login paths proxied to the gateway
+```
+
 > Do not run both options at the same time. Containers publish on `127.0.0.1` while the IDE binds every
 > interface, so both can hold the same port and register in the same Eureka, which mixes the instances.
 > Stop one option before starting the other (`docker compose --profile app stop`).
@@ -282,9 +295,11 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (45 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (48 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
+- web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
+  gateway on the same origin;
 - browser session (BFF): login scripted on the Keycloak page through the gateway, `/bff/me` with the realm roles, an API
   call with the session cookie only (token relayed), a write refused without the CSRF token, logout;
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
@@ -329,12 +344,35 @@ docker compose --profile app down        # keeps the data volumes
 docker compose --profile app down -v     # also deletes the databases
 ```
 
+## Web application
+
+`frontend/` is an Angular application in French, built after the validated mockups (indigo theme, Inter and Plus Jakarta
+Sans served from the application itself, never from a font CDN).
+
+| Topic | Choice |
+|---|---|
+| Sign-in | Backend for Frontend: no token in the browser. `GET /bff/me` tells who is signed in, "Se connecter" goes to `/oauth2/authorization/keycloak`, "Se déconnecter" posts `/logout` then follows the Keycloak logout URL |
+| CSRF | `HttpClient` sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header on writes: the names Spring Security uses by default |
+| Same origin | nginx in Docker, the dev-server proxy (`proxy.conf.json`) in development; the `Host` header is kept so that the gateway builds the OAuth2 redirect URI on `localhost:4200` |
+| API client | Generated from `frontend/openapi/*.json` with `ng-openapi-gen`, committed. CI fails if the client is not regenerated, and the e2e job fails if a service no longer serves the committed document |
+| Errors | One interceptor turns every failure into an `ApiProblem`: the stable `code` of the RFC 9457 problem and a message in French |
+| Security headers | Content Security Policy without inline script (`'self'` only), `nosniff`, no framing, strict referrer policy |
+| Accessibility | Skip link, landmarks, visible focus, live region for results, French labels for screen readers (paginator, gauges) |
+
+After a change of the API, with the platform running:
+
+```bash
+./scripts/openapi.sh update                  # fetch the OpenAPI documents through the gateway
+(cd frontend && npm run api:generate)        # regenerate the client in src/app/api, then commit both
+```
+
 ## Testing
 
 | Level | Tools | Scope |
 |---|---|---|
 | Unit | JUnit 5, AssertJ, Mockito, Spring Security Test | Domain rules (ownership, visibility), application services, HTTP adapters and access rules, the circuit breaker configuration on a real Resilience4j breaker |
 | Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs |
+| Web application | Vitest, Angular TestBed, `HttpTestingController` | Session (BFF), error mapping, guards, pages and components against a fake HTTP backend; coverage floor 85 % lines, 80 % branches (`npm test` in `frontend`) |
 | End to end | `scripts/e2e-docker.sh` | The whole platform in Docker with a real Keycloak, through the gateway only, including an outage and the recovery of `event-service` |
 
 `./mvnw verify` runs the unit and integration tests (Docker is required for Testcontainers) and the coverage checks.
@@ -354,12 +392,12 @@ coverage can only go up:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | Pull request to `dev` or `main`, push to `dev` | `build`: `./mvnw verify`, coverage table on the run page, reports as artifacts. `e2e`: the whole platform in Docker and the end-to-end scenario |
+| `ci.yml` | Pull request to `dev` or `main`, push to `dev` | `build`: `./mvnw verify`, coverage table on the run page, reports as artifacts. `frontend`: generated API client up to date, lint, format, unit tests, production build. `e2e`: the whole platform in Docker, the end-to-end scenario, and the OpenAPI documents of the front-end checked against the running services |
 | `release.yml` | Push to `main`, tag `vX.Y.Z` | Tests again, then for each image: build, Trivy scan (fails on any fixable critical vulnerability), build for `linux/amd64` and `linux/arm64`, push to Docker Hub with SBOM and provenance |
 | Dependabot | Weekly | Pull requests against `dev` for Maven dependencies, GitHub Actions and Docker base images |
 
 - Every action is pinned by commit SHA; workflow tokens are read-only (`contents: read`).
-- Rulesets on `dev` and `main`: changes through pull requests only, `build` and `e2e` required, no force push, no deletion.
+- Rulesets on `dev` and `main`: changes through pull requests only, `build`, `frontend` and `e2e` required, no force push, no deletion.
 - CI uses throwaway database passwords, Keycloak admin password and client secret generated (and masked) per run;
   the Docker Hub token is scoped to read and write, expires, and lives in the repository secrets only.
 
@@ -403,7 +441,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search); Angular application (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application, catalogue first (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |
