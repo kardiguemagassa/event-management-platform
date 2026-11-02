@@ -129,6 +129,42 @@ class GatewaySecurityIT {
         assertThat(send("GET", "/actuator/health/readiness", null).statusCode()).isEqualTo(200);
     }
 
+    @Test
+    void browserLoginStartsAtKeycloakWithPkce() throws Exception {
+        HttpResponse<String> response = send("GET", "/oauth2/authorization/keycloak", null);
+
+        assertThat(response.statusCode()).isEqualTo(302);
+        assertThat(response.headers().firstValue("Location")).hasValueSatisfying(location -> assertThat(location)
+                .startsWith("http://localhost:8180/realms/event-platform/protocol/openid-connect/auth?")
+                .contains("client_id=event-platform-bff", "code_challenge_method=S256", "code_challenge=",
+                        "scope=openid"));
+    }
+
+    @Test
+    void signedInUserEndpointNeedsASessionLogin() throws Exception {
+        HttpResponse<String> anonymous = send("GET", "/bff/me", null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(anonymous.body()).contains("\"code\":\"UNAUTHENTICATED\"");
+        // A bearer-token caller is authenticated but has no browser session.
+        assertThat(send("GET", "/bff/me", TestTokens.valid()).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void writeWithTheSessionCookieNeedsTheCsrfToken() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/registrations"))
+                .header("Content-Type", "application/json")
+                .header("Cookie", "SESSION=forged")
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"code\":\"ACCESS_DENIED\"");
+        assertThat(BACKEND.requests()).isZero();
+    }
+
     private HttpResponse<String> send(String method, String path, String token) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Content-Type", "application/json")

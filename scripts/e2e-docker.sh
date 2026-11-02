@@ -171,6 +171,38 @@ check "token issued by another realm" 401 UNAUTHENTICATED
 AUTH=none call GET "/api/events/$E"; check "anonymous read of the public catalog" 200
 call POST "/api/events/$E/capacity/reserve" '{}'; check "internal capacity route closed at the edge" 403 ACCESS_DENIED
 
+# What a browser does, scripted: sign in on the Keycloak page through the gateway (BFF), then call the API with the
+# session cookie only. On localhost: the address registered as redirect URI of the event-platform-bff client.
+echo "== Browser session (BFF)"
+B=http://localhost:8080
+JAR=$(mktemp)
+bff() { curl -s -c "$JAR" -b "$JAR" "$@"; }
+LOGIN_PAGE=$(bff -o /dev/null -w '%{redirect_url}' "$B/oauth2/authorization/keycloak")
+LOGIN_ACTION=$(bff "$LOGIN_PAGE" | python3 -c '
+import html, re, sys
+form = re.search(r"<form[^>]*kc-form-login[^>]*>", sys.stdin.read())
+action = re.search(r"action=\"([^\"]+)\"", form.group(0)) if form else None
+print(html.unescape(action.group(1)) if action else "")')
+CALLBACK=$(bff -o /dev/null -w '%{redirect_url}' --data-urlencode "username=$E2E_USER" \
+  --data-urlencode "password=$E2E_PASSWORD" "$LOGIN_ACTION")
+bff -o /dev/null "$CALLBACK"   # code exchanged by the gateway: session cookie, then redirect to the front-end
+ME=$(bff "$B/bff/me")
+[[ "$ME" == *"\"email\":\"$E2E_USER\""* && "$ME" == *ORGANIZER* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  browser login through the gateway: session cookie, /bff/me with the realm roles"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  browser login (callback ${CALLBACK:0:80}) /bff/me: ${ME:0:200}"; }
+SESSION_CODE=$(bff -o /dev/null -w '%{http_code}' "$B/api/registrations/me")
+[ "$SESSION_CODE" = 200 ] \
+  && { PASS=$((PASS+1)); echo "PASS  API call with the session cookie only: the gateway relays the access token"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  API call with the session cookie -> $SESSION_CODE"; }
+NO_CSRF=$(bff -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$B/api/registrations")
+XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$JAR" | tail -1)
+LOGOUT=$(bff -X POST -H "X-XSRF-TOKEN: $XSRF" "$B/logout")
+AFTER=$(bff -o /dev/null -w '%{http_code}' "$B/bff/me")
+[[ "$NO_CSRF" = 403 && -n "$XSRF" && "$LOGOUT" == *"/protocol/openid-connect/logout?"* && "$AFTER" = 401 ]] \
+  && { PASS=$((PASS+1)); echo "PASS  session write refused without CSRF token; logout ends the session and points to Keycloak"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  CSRF ($NO_CSRF, token ${XSRF:+present}) logout (${LOGOUT:0:120}) then /bff/me -> $AFTER"; }
+rm -f "$JAR"
+
 echo "== Business rules"
 register 1; check "register attendee 1" 201; R1=$(field id)
 register 1; check "duplicate attendee 1" 409 ALREADY_REGISTERED

@@ -73,7 +73,7 @@ jobs:
       - name: Create .env
         run: |
           cp .env.example .env
-          for key in USER_DB_PASSWORD EVENT_DB_PASSWORD REGISTRATION_DB_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD REGISTRATION_SERVICE_CLIENT_SECRET; do
+          for key in USER_DB_PASSWORD EVENT_DB_PASSWORD REGISTRATION_DB_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD REGISTRATION_SERVICE_CLIENT_SECRET BFF_CLIENT_SECRET; do
             value=$(openssl rand -hex 16)
             echo "::add-mask::$value"
             sed -i "s|^${key}=.*|${key}=${value}|" .env

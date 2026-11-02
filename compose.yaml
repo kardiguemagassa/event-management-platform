@@ -117,8 +117,9 @@ services:
       KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HEALTH_ENABLED: "true"
-      # Placeholder resolved in the realm file at import: no secret in Git.
+      # Placeholders resolved in the realm file at import: no secret in Git.
       REGISTRATION_SERVICE_CLIENT_SECRET: ${REGISTRATION_SERVICE_CLIENT_SECRET:?REGISTRATION_SERVICE_CLIENT_SECRET is required}
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET:?BFF_CLIENT_SECRET is required}
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
     volumes:
@@ -258,6 +259,9 @@ services:
         MODULE: api-gateway
     environment:
       <<: *spring-environment
+      # Backend for Frontend: confidential client secret, and Keycloak on the compose network for the token exchange.
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET:?BFF_CLIENT_SECRET is required}
+      KEYCLOAK_REALM_URI: http://keycloak:8080/realms/event-platform
     # Single public entry point; the services themselves publish no port.
     ports:
       - "127.0.0.1:8080:8080"

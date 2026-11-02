@@ -118,9 +118,31 @@ the Keycloak admin console.
 | `GET` `PUT` `DELETE /api/users/me` | authenticated, one's own profile |
 | `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN` |
 
-Clients: `event-platform-web` (public, Authorization Code with PKCE, for the future front-end) and
-`registration-service` (confidential, client credentials, its secret comes from `.env`). The access tokens carry the
-audience `event-platform-api`, checked by every service.
+Clients, all issuing access tokens with the audience `event-platform-api`, checked by every service:
+
+| Client | Type | Used by |
+|---|---|---|
+| `event-platform-bff` | confidential, Authorization Code with PKCE, secret from `.env` | the gateway as Backend for Frontend (browser login) |
+| `event-platform-web` | public, Authorization Code with PKCE | the Swagger UI ("Authorize") |
+| `registration-service` | confidential, client credentials, secret from `.env` | `registration-service` calling `event-service` |
+
+### Backend for Frontend (browser login)
+
+A browser never holds a token: it signs in through the gateway, which keeps the tokens in its session and gives the
+browser an `HttpOnly` session cookie only (OAuth 2.0 for Browser-Based Apps, BFF pattern).
+
+| Endpoint | What it does |
+|---|---|
+| `GET /oauth2/authorization/keycloak` | starts the login on the Keycloak page; back on `/login/oauth2/code/keycloak`, then to the front-end (`BFF_FRONT_URL`, `http://localhost:4200/` by default) |
+| `GET /bff/me` | the signed-in user: `subject`, `name`, `email`, realm `roles` (from the ID token), or `401`; sets the `XSRF-TOKEN` cookie |
+| `/api/**` with the session cookie | the TokenRelay filter adds the session's access token, refreshed when expired; the services are unchanged |
+| `POST /logout` | ends the gateway session and answers `{"logoutUrl": ...}`: the Keycloak end-session URL the front-end navigates to, so that single sign-on does not log the user back in |
+
+- **CSRF**: a write sent with the session cookie needs the `X-XSRF-TOKEN` header (value of the `XSRF-TOKEN` cookie,
+  which Angular's `HttpClient` sends natively). Bearer-token calls are not checked: a browser never sends a bearer token
+  on its own.
+- **Bearer tokens still work** next to sessions (Swagger UI, API clients, tests): one gateway, two ways in.
+- **Sessions in memory**: one gateway instance. Several replicas would share them through Spring Session and Redis.
 
 ## Observability
 
@@ -244,9 +266,11 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (34 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (37 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
+- browser session (BFF): login scripted on the Keycloak page through the gateway, `/bff/me` with the realm roles, an API
+  call with the session cookie only (token relayed), a write refused without the CSRF token, logout;
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
@@ -361,11 +385,9 @@ pull request would change `main` directly and require merging `main` back into `
 
 ## Roadmap
 
-- **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
-  cookie, token relay to the services), so that no token is ever stored in the browser.
-- **Observability**: trace id in the gateway's own errors, alert routing to an on-call channel.
-- **Keycloak login theme**: the sign-in and registration pages styled like the Angular front-end (Keycloakify or a
-  FreeMarker/CSS theme), still served by Keycloak.
-- **Reliability**: transactional outbox and messaging for the registration saga.
-- **Frontend**: Angular application served by nginx, proxying `/api` to the gateway (same origin, no CORS), with a
-  TypeScript client generated from the OpenAPI specifications and login through the gateway (BFF).
+| Version | Content |
+|---|---|
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search); Angular application (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
+| **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
+| **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |
