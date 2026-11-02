@@ -1,6 +1,7 @@
 package com.kmg.eventplatform.registration.infrastructure.client;
 
 import com.kmg.eventplatform.registration.TestcontainersConfiguration;
+import com.kmg.eventplatform.registration.application.AttendeeDirectory;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventCatalog;
 import com.kmg.eventplatform.registration.application.EventFullException;
@@ -19,6 +20,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,20 +39,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DownstreamResilienceIT {
 
     private static final FakeDownstream EVENT_SERVICE = FakeDownstream.start();
+    private static final FakeDownstream USER_SERVICE = FakeDownstream.start();
 
     @DynamicPropertySource
     static void downstreams(DynamicPropertyRegistry registry) {
         registry.add("spring.cloud.discovery.client.simple.instances.event-service[0].uri", EVENT_SERVICE::url);
+        registry.add("spring.cloud.discovery.client.simple.instances.user-service[0].uri", USER_SERVICE::url);
         registry.add("spring.security.oauth2.client.provider.keycloak.token-uri", TestTokens::tokenUri);
     }
 
     @AfterAll
     static void stopDownstreams() {
         EVENT_SERVICE.stop();
+        USER_SERVICE.stop();
     }
 
     @Autowired
     private EventCatalog events;
+
+    @Autowired
+    private AttendeeDirectory attendees;
 
     @Autowired
     private Resilience4JCircuitBreakerFactory circuitBreakers;
@@ -59,6 +67,7 @@ class DownstreamResilienceIT {
     @BeforeEach
     void resetDownstreamAndCircuits() {
         EVENT_SERVICE.reset();
+        USER_SERVICE.reset();
         circuitBreakers.getCircuitBreakerRegistry().getAllCircuitBreakers().forEach(CircuitBreaker::reset);
     }
 
@@ -117,6 +126,28 @@ class DownstreamResilienceIT {
         EVENT_SERVICE.answer(200, "{\"id\":\"" + UUID.randomUUID() + "\",\"organizerId\":\"" + organizer + "\"}");
 
         assertThat(events.organizerOf(UUID.randomUUID())).hasValue(organizer);
+    }
+
+    @Test
+    void attendeeNamesComeFromUserServiceWithTheServiceAccountToken() {
+        UUID ada = UUID.randomUUID();
+        USER_SERVICE.answer(200, "[{\"id\":\"" + ada + "\",\"fullName\":\"Ada Lovelace\"}]");
+
+        assertThat(attendees.namesOf(Set.of(ada))).containsEntry(ada, "Ada Lovelace");
+        assertThat(USER_SERVICE.authorizations()).singleElement()
+                .satisfies(authorization -> assertThat(authorization).startsWith("Bearer "));
+        assertThat(EVENT_SERVICE.requests()).isZero();
+    }
+
+    @Test
+    void userServiceOutageIsRetriedOnItsOwnCircuit() {
+        USER_SERVICE.answer(503, "");
+        USER_SERVICE.answer(503, "");
+
+        assertThatThrownBy(() -> attendees.namesOf(Set.of(UUID.randomUUID())))
+                .isInstanceOf(DownstreamUnavailableException.class);
+        assertThat(USER_SERVICE.requests()).isEqualTo(2);
+        assertThat(circuitBreakers.getCircuitBreakerRegistry().find("user-service")).isPresent();
     }
 
     @Test

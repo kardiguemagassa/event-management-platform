@@ -14,6 +14,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,6 +117,15 @@ class GatewaySecurityIT {
     @Test
     void capacityRoutesAskAnonymousCallersToAuthenticate() throws Exception {
         assertThat(send("POST", "/api/events/42/capacity/reserve", null).statusCode()).isEqualTo(401);
+        assertThat(BACKEND.requests()).isZero();
+    }
+
+    @Test
+    void userNamesRouteIsClosedAtTheEdgeEvenWithAValidToken() throws Exception {
+        HttpResponse<String> response = send("GET", "/api/users/names?ids=" + UUID.randomUUID(), TestTokens.valid());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"code\":\"ACCESS_DENIED\"");
         assertThat(BACKEND.requests()).isZero();
     }
 

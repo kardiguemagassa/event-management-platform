@@ -223,6 +223,14 @@ register 2; check "register attendee 2" 201; R2=$(field id)
 AUTH=$(attendee_token 2) call POST "/api/registrations/$R1/cancel"
 check "another attendee cannot cancel the registration" 404 REGISTRATION_NOT_FOUND
 call GET "/api/registrations/events/$E"; check "organizer lists the registrations of the event" 200
+# Attendee names come from user-service (internal names route, PROFILE_READER service account).
+names() { python3 -c 'import json,sys;print(",".join(sorted(str(r.get("attendeeName")) for r in json.loads(sys.argv[1])["content"])))' "$BODY" 2>/dev/null; }
+call GET "/api/registrations/events/$E?status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(names)" = "Attendee 1,Attendee 2" ] \
+  && { PASS=$((PASS+1)); echo "PASS  confirmed registrations carry the attendee names"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  attendee names -> $CODE body=$BODY"; }
+call GET "/api/users/names?ids=$(python3 -c 'import uuid;print(uuid.uuid4())')"
+check "internal names route closed at the edge" 403 ACCESS_DENIED
 AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_OTHER" "$E2E_PASSWORD") call GET "/api/registrations/events/$E"
 check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
 register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
@@ -326,6 +334,10 @@ SEATS=$(field availableSeats)
 
 echo "== Right to erasure"
 AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204
+call GET "/api/registrations/events/$E?status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(names)" = "Attendee 3,None" ] \
+  && { PASS=$((PASS+1)); echo "PASS  a deleted profile leaves the registration listed without a name"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  name of a deleted profile -> $CODE body=$BODY"; }
 
 echo "== Result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

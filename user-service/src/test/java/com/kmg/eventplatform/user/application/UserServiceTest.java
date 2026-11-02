@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -145,6 +146,14 @@ class UserServiceTest {
                     .isInstanceOf(UserNotFoundException.class)
                     .hasMessageContaining(ADA.toString());
         }
+    }
+
+    @Test
+    void findAllByIdDelegatesToTheRepository() {
+        User ada = User.register(ADA, "Ada Lovelace", "ada@example.com", NOW);
+        when(repository.findAllById(Set.of(ADA))).thenReturn(List.of(ada));
+
+        assertThat(service.findAllById(Set.of(ADA))).containsExactly(ada);
     }
 
     @Test
