@@ -85,8 +85,30 @@
   }
 }
 
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .seats {
   margin: 0;
   font-size: 13px;
   color: #475569;
+}
+
+// Says the card opens the event (the whole card is the link, in the catalogue).
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mat-sys-primary);
+  white-space: nowrap;
+  mat-icon {
+    width: 16px;
+    height: 16px;
+  }
 }

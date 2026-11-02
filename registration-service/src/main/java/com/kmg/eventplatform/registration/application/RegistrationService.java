@@ -10,13 +10,20 @@ import org.springframework.core.NestedExceptionUtils;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import static com.kmg.eventplatform.registration.domain.RegistrationSpecifications.forEvent;
+import static com.kmg.eventplatform.registration.domain.RegistrationSpecifications.hasStatus;
+import static com.kmg.eventplatform.registration.domain.RegistrationSpecifications.ofUser;
 
 /**
  * Registers the authenticated user to an event of event-service. The attendee is the caller identified by
@@ -140,8 +147,20 @@ public class RegistrationService {
         return page.map(registration -> new EventRegistration(registration, names.get(registration.getUserId())));
     }
 
-    public Page<Registration> findByUser(UUID userId, Pageable pageable) {
-        return repository.findByUserId(userId, pageable);
+    /**
+     * The caller's registrations, optionally for one event and in one status: "am I registered to this event?" is
+     * {@code eventId} with {@code CONFIRMED}.
+     */
+    public Page<Registration> findByUser(UUID userId, UUID eventId, RegistrationStatus status, Pageable pageable) {
+        List<Specification<Registration>> criteria = new ArrayList<>();
+        criteria.add(ofUser(userId));
+        if (eventId != null) {
+            criteria.add(forEvent(eventId));
+        }
+        if (status != null) {
+            criteria.add(hasStatus(status));
+        }
+        return repository.findAll(Specification.allOf(criteria), pageable);
     }
 
     private Map<UUID, String> attendeeNames(Page<Registration> page) {

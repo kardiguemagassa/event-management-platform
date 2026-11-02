@@ -161,8 +161,32 @@
           "Registrations"
         ],
         "summary": "List the caller's registrations",
+        "description": "Optionally for one event and in one status: eventId with CONFIRMED tells whether the caller is registered to that event.",
         "operationId": "mine",
         "parameters": [
+          {
+            "name": "eventId",
+            "in": "query",
+            "description": "Only the registrations to this event",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only registrations in this status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CONFIRMED",
+                "CANCELLED"
+              ]
+            }
+          },
           {
             "name": "page",
             "in": "query",
