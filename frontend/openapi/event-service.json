@@ -1,0 +1,865 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Event Service API",
+    "description": "Manages events, their lifecycle and capacity. Errors follow RFC 9457 and carry a stable `code`.",
+    "version": "0.0.0-SNAPSHOT"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "security": [
+    {
+      "keycloak": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Capacity",
+      "description": "Internal: seat reservation for registration-service (REST alternative to messaging). Closed at the gateway (403) and restricted to the SEAT_MANAGER role: not callable from this UI."
+    },
+    {
+      "name": "Events",
+      "description": "Manage events and their lifecycle"
+    }
+  ],
+  "paths": {
+    "/api/events/{id}": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Get an event by id",
+        "description": "Public, except drafts: visible to their organizer only.",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Replace an event",
+        "description": "Full replacement. Not allowed once cancelled; capacity cannot go below the reserved seats.",
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Event updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Delete an event",
+        "description": "Only events without reservations; cancel it otherwise.",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Event deleted"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "List events",
+        "description": "Paginated (default size 20, max 100). Public events plus the caller's own drafts; filters are optional and combined with AND. Sortable by: startAt (default, asc), createdAt, title.",
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only events in this status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "PUBLISHED",
+                "CANCELLED"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Title or location containing this text, case-insensitive (max 100 characters)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "paris"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Only events starting at or after this instant (ISO-8601)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "example": "2026-12-01T00:00:00Z"
+          },
+          {
+            "name": "organizer",
+            "in": "query",
+            "description": "`me`: every event of the caller, drafts and cancelled ones included (ORGANIZER role)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "me"
+              ]
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Only these events (batch read, max 100 ids, comma-separated); events the caller cannot see are left out",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Zero-based page index (0..N)",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "The size of the page to be returned",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Sorting criteria in the format: property,(asc|desc). Default sort order is ascending. Multiple sort criteria are supported.",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "startAt,ASC"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "organizer=me without a token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseEventResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "organizer=me without the ORGANIZER role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseEventResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Create an event",
+        "description": "Requires the ORGANIZER role; the caller becomes its organizer. Created as DRAFT, visible to its organizer only until published.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Event created; Location header points to the new resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/events/{id}/publish": {
+      "post": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Publish an event",
+        "description": "DRAFT -> PUBLISHED. Idempotent.",
+        "operationId": "publish",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/events/{id}/capacity/reserve": {
+      "post": {
+        "tags": [
+          "Capacity"
+        ],
+        "summary": "Reserve one seat",
+        "description": "Atomic: never overbooks. Idempotent per reservationId: a replay returns ALREADY_RESERVED.",
+        "operationId": "reserve",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapacityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Seat reserved (or already reserved by this reservationId)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessDenied"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/events/{id}/capacity/release": {
+      "post": {
+        "tags": [
+          "Capacity"
+        ],
+        "summary": "Release one seat",
+        "description": "Compensation for a failed registration. Idempotent: an unknown or already released reservationId returns NOT_RESERVED.",
+        "operationId": "release",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapacityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Seat released (or nothing to release)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessDenied"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/events/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "Cancel an event",
+        "description": "DRAFT or PUBLISHED -> CANCELLED. Idempotent.",
+        "operationId": "cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Event id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProblemDetail": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "about:blank"
+          },
+          "title": {
+            "type": "string",
+            "example": "Invalid event state"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "example": 409
+          },
+          "detail": {
+            "type": "string",
+            "example": "Cannot publish event 3f2b8c1e-\u2026 in status CANCELLED"
+          },
+          "instance": {
+            "type": "string",
+            "example": "/api/events/3f2b8c1e-\u2026/publish"
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code",
+            "example": "INVALID_EVENT_STATE"
+          }
+        }
+      },
+      "EventRequest": {
+        "required": [
+          "capacity",
+          "location",
+          "startAt",
+          "title"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "maxLength": 200,
+            "minLength": 0,
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 0,
+            "type": "string"
+          },
+          "location": {
+            "maxLength": 200,
+            "minLength": 0,
+            "type": "string"
+          },
+          "startAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capacity": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "EventResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "startAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capacity": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reservedSeats": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "availableSeats": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "CANCELLED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "organizerId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CapacityRequest": {
+        "required": [
+          "reservationId"
+        ],
+        "type": "object",
+        "properties": {
+          "reservationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CapacityResponse": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "RESERVED",
+              "ALREADY_RESERVED",
+              "RELEASED",
+              "NOT_RESERVED"
+            ]
+          }
+        }
+      },
+      "PageResponseEventResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventResponse"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request (validation, malformed JSON, start not in future, invalid sort)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Validation failed",
+              "status": 400,
+              "detail": "One or more fields are invalid",
+              "instance": "/api/events",
+              "code": "VALIDATION_FAILED",
+              "errors": {
+                "capacity": "must be greater than or equal to 1"
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Event not found",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Event not found",
+              "status": 404,
+              "detail": "Event 3f2b8c1e-\u2026 not found",
+              "instance": "/api/events/3f2b8c1e-\u2026",
+              "code": "EVENT_NOT_FOUND"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Not the organizer of this event (NOT_EVENT_ORGANIZER)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Not the event organizer",
+              "status": 403,
+              "detail": "You are not the organizer of event 3f2b8c1e-\u2026",
+              "instance": "/api/events/3f2b8c1e-\u2026",
+              "code": "NOT_EVENT_ORGANIZER"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Business conflict (invalid state, capacity below reserved, has reservations, concurrent modification)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Invalid event state",
+              "status": 409,
+              "detail": "Cannot publish event 3f2b8c1e-\u2026 in status CANCELLED",
+              "instance": "/api/events/3f2b8c1e-\u2026/publish",
+              "code": "INVALID_EVENT_STATE"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, invalid or expired access token",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Unauthorized",
+              "status": 401,
+              "detail": "A valid access token is required",
+              "instance": "/api/\u2026",
+              "code": "UNAUTHENTICATED"
+            }
+          }
+        }
+      },
+      "AccessDenied": {
+        "description": "The caller's roles do not allow this operation",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Forbidden",
+              "status": 403,
+              "detail": "You are not allowed to access this resource",
+              "instance": "/api/\u2026",
+              "code": "ACCESS_DENIED"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "keycloak": {
+        "type": "oauth2",
+        "description": "Keycloak sign-in (authorization code with PKCE)",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "http://localhost:8180/realms/event-platform/protocol/openid-connect/auth",
+            "tokenUrl": "http://localhost:8180/realms/event-platform/protocol/openid-connect/token",
+            "scopes": {
+              "openid": "OpenID Connect sign-in"
+            }
+          }
+        }
+      }
+    }
+  }
+}

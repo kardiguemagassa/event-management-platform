@@ -1,0 +1,10 @@
+{
+  "$schema": "../node_modules/ng-openapi-gen/ng-openapi-gen-schema.json",
+  "input": "openapi/user-service.json",
+  "output": "src/app/api/users",
+  "apiService": "UsersApi",
+  "configuration": "UsersApiConfiguration",
+  "promises": false,
+  "ignoreUnusedModels": true,
+  "silent": true
+}

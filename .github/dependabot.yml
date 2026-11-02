@@ -22,3 +22,19 @@ updates:
     target-branch: dev
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /frontend
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      # Angular packages move together (framework, CLI, Material): one pull request per release.
+      angular:
+        patterns: ["@angular/*", "@angular-devkit/*", "angular-eslint"]
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /frontend
+    target-branch: dev
+    schedule:
+      interval: weekly

@@ -1,0 +1,86 @@
+<header class="page-header">
+  <h1>Événements à venir</h1>
+  <p class="subtitle">Trouve un événement et inscris-toi en quelques clics.</p>
+</header>
+
+<form class="filters" role="search" (submit)="$event.preventDefault()">
+  <mat-form-field appearance="outline" class="search" subscriptSizing="dynamic">
+    <mat-label>Rechercher</mat-label>
+    <mat-icon matPrefix svgIcon="search" aria-hidden="true" />
+    <input
+      matInput
+      type="search"
+      [formControl]="search"
+      [maxlength]="maxSearchLength"
+      placeholder="Titre ou lieu"
+      autocomplete="off"
+    />
+  </mat-form-field>
+
+  <mat-form-field appearance="outline" class="day" subscriptSizing="dynamic">
+    <mat-label>À partir du</mat-label>
+    <input
+      matInput
+      [matDatepicker]="picker"
+      [formControl]="day"
+      [min]="today"
+      placeholder="jj/mm/aaaa"
+    />
+    <mat-datepicker-toggle matIconSuffix [for]="picker" aria-label="Choisir une date" />
+    <mat-datepicker #picker />
+  </mat-form-field>
+
+  @if (filtered()) {
+    <button mat-button type="button" (click)="clearFilters()">Effacer les filtres</button>
+  }
+</form>
+
+@if (events.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Chargement des événements" />
+}
+
+<section aria-live="polite" class="results">
+  @if (errorMessage(); as message) {
+    <div class="state" role="alert">
+      <p>{{ message }}</p>
+      <button mat-stroked-button type="button" (click)="events.reload()">Réessayer</button>
+    </div>
+  } @else if (events.hasValue()) {
+    @let page = events.value();
+    @if (page.content?.length) {
+      <p class="count">
+        {{ page.totalElements }} événement{{ page.totalElements === 1 ? '' : 's' }}
+      </p>
+      <ul class="grid">
+        @for (event of page.content; track event.id) {
+          <li><app-event-card [event]="event" /></li>
+        }
+      </ul>
+      @if ((page.totalPages ?? 0) > 1) {
+        <mat-paginator
+          [length]="page.totalElements"
+          [pageIndex]="page.page"
+          [pageSize]="pageSize"
+          [hidePageSize]="true"
+          (page)="changePage($event)"
+          aria-label="Pages des événements"
+        />
+      }
+    } @else {
+      <div class="state">
+        <p>
+          @if (filtered()) {
+            Aucun événement ne correspond à ta recherche.
+          } @else {
+            Aucun événement à venir pour le moment.
+          }
+        </p>
+        @if (filtered()) {
+          <button mat-stroked-button type="button" (click)="clearFilters()">
+            Effacer les filtres
+          </button>
+        }
+      </div>
+    }
+  }
+</section>

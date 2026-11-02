@@ -1,0 +1,24 @@
+<article class="card" [attr.aria-label]="event().title">
+  <div class="meta">
+    <time class="date" [attr.datetime]="event().startAt">{{
+      event().startAt | date: 'EEE d MMM · HH:mm'
+    }}</time>
+    <span class="badge" [class]="seats().tone">{{ seats().label }}</span>
+  </div>
+  <h2 class="title">{{ event().title }}</h2>
+  <p class="place">
+    <mat-icon svgIcon="place" aria-hidden="true" />
+    {{ event().location }}
+  </p>
+  <div
+    class="gauge"
+    role="meter"
+    aria-label="Places réservées"
+    aria-valuemin="0"
+    aria-valuemax="100"
+    [attr.aria-valuenow]="seats().booked"
+  >
+    <span [class]="seats().tone" [style.width.%]="seats().booked"></span>
+  </div>
+  <p class="seats">{{ seatsLabel() }}</p>
+</article>
