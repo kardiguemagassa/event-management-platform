@@ -10,7 +10,10 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
-/** Every user manages their own profile; the profiles of others are personal data, for administrators only. */
+/**
+ * Every user manages their own profile; the profiles of others are personal data, for administrators only.
+ * Services read display names only, with a technical role.
+ */
 @Configuration(proxyBeanMethods = false)
 @Import(PlatformSecurityConfiguration.class)
 public class SecurityConfig {
@@ -21,6 +24,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.FORWARD).permitAll()
                         .requestMatchers("/api/users/me").authenticated()
+                        // Display names for other services (registration-service): closed at the gateway.
+                        .requestMatchers(HttpMethod.GET, "/api/users/names").hasRole("PROFILE_READER")
                         .requestMatchers("/api/users", "/api/users/*").hasRole("ADMIN")
                         // Probes and info: exposed on the internal network only.
                         .requestMatchers(HttpMethod.GET, "/actuator/**").permitAll()

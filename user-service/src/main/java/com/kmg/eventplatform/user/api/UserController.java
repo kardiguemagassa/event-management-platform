@@ -11,6 +11,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.springdoc.core.annotations.ParameterObject;
@@ -27,13 +29,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
- * {@code /me}: the caller's own profile, identified by the access token. The other routes are for
- * administrators only (personal data of every user).
+ * {@code /me}: the caller's own profile, identified by the access token. {@code /names}: display names for
+ * other services. The other routes are for administrators only (personal data of every user).
  */
 @Tag(name = "Users", description = "Application profiles of the users (identity is managed by Keycloak)")
 @RestController
@@ -42,6 +45,9 @@ public class UserController {
 
     /** Only these properties may be used for sorting (whitelist: predictable, index-backed queries). */
     private static final Set<String> SORTABLE_PROPERTIES = Set.of("createdAt", "fullName", "email");
+
+    /** Batch size of the names lookup: one page of registrations at most. */
+    private static final int MAX_IDS = 100;
 
     private final UserService service;
 
@@ -81,6 +87,25 @@ public class UserController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteMe(@Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
         service.delete(userId(caller));
+    }
+
+    @Operation(summary = "Display names of users",
+            description = "Internal: requires the PROFILE_READER role (service account of registration-service), "
+                    + "closed at the gateway. Users without a profile are left out; no e-mail is returned.")
+    @ApiResponse(responseCode = "200", description = "Names of the users found, in no particular order")
+    @ApiResponse(responseCode = "400", ref = BAD_REQUEST)
+    @GetMapping("/names")
+    public List<UserNameResponse> names(
+            @Parameter(description = "User ids, comma-separated (max " + MAX_IDS + ")")
+            @RequestParam(required = false) List<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> distinct = new HashSet<>(ids);
+        if (distinct.size() > MAX_IDS) {
+            throw new InvalidQueryParameterException("ids", "At most " + MAX_IDS + " ids");
+        }
+        return service.findAllById(distinct).stream().map(UserNameResponse::from).toList();
     }
 
     @Operation(summary = "Get a user by id", description = "Requires the ADMIN role.")

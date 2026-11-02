@@ -44,6 +44,7 @@ class RegistrationServiceTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID organizerId = UUID.randomUUID();
     private final FakeEventCatalog events = new FakeEventCatalog();
+    private final FakeAttendeeDirectory attendees = new FakeAttendeeDirectory();
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private RegistrationService service;
 
@@ -52,7 +53,7 @@ class RegistrationServiceTest {
         events.events.add(eventId);
         events.organizers.put(eventId, organizerId);
         service = new RegistrationService(repository, events, Clock.fixed(NOW, ZoneOffset.UTC),
-                new RegistrationMetrics(meters));
+                new RegistrationMetrics(meters), attendees);
     }
 
     @Test
@@ -222,27 +223,58 @@ class RegistrationServiceTest {
     }
 
     @Test
-    void organizerListsTheRegistrationsOfTheirEvent() {
+    void organizerListsTheRegistrationsOfTheirEventWithTheAttendeeNames() {
         Pageable pageable = PageRequest.of(0, 20);
-        Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
-        when(repository.findByEventId(eventId, pageable)).thenReturn(page);
+        Registration withProfile = confirmedRegistration();
+        Registration withoutProfile = Registration.confirm(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW);
+        attendees.names.put(userId, "Ada Lovelace");
+        when(repository.findByEventId(eventId, pageable))
+                .thenReturn(new PageImpl<>(List.of(withProfile, withoutProfile), pageable, 2));
 
-        assertThat(service.findByEvent(eventId, organizerId, pageable)).isSameAs(page);
+        Page<EventRegistration> page = service.findByEvent(eventId, null, organizerId, pageable);
+
+        assertThat(page.getContent()).containsExactly(
+                new EventRegistration(withProfile, "Ada Lovelace"),
+                new EventRegistration(withoutProfile, null));
+        assertThat(page.getTotalElements()).isEqualTo(2);
+        assertThat(attendees.calls).as("one call per page").isEqualTo(1);
+    }
+
+    @Test
+    void organizerFiltersTheRegistrationsByStatus() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CANCELLED, pageable))
+                .thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        assertThat(service.findByEvent(eventId, RegistrationStatus.CANCELLED, organizerId, pageable)).isEmpty();
+        assertThat(attendees.calls).as("no attendee, no call").isZero();
+    }
+
+    @Test
+    void registrationsAreListedWithoutNamesWhenUserServiceFails() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Registration registration = confirmedRegistration();
+        attendees.failure = new DownstreamUnavailableException("user-service", "circuit breaker is open");
+        when(repository.findByEventId(eventId, pageable)).thenReturn(new PageImpl<>(List.of(registration), pageable, 1));
+
+        assertThat(service.findByEvent(eventId, null, organizerId, pageable).getContent())
+                .containsExactly(new EventRegistration(registration, null));
     }
 
     @Test
     void otherUsersCannotListTheRegistrationsOfAnEvent() {
-        assertThatThrownBy(() -> service.findByEvent(eventId, userId, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> service.findByEvent(eventId, null, userId, PageRequest.of(0, 20)))
                 .isInstanceOf(NotEventOrganizerException.class)
                 .hasMessageContaining(eventId.toString());
         verify(repository, never()).findByEventId(any(), any());
+        assertThat(attendees.calls).isZero();
     }
 
     @Test
     void registrationsOfAnEventCreatedBeforeOwnershipAreListedByNobody() {
         events.organizers.remove(eventId);
 
-        assertThatThrownBy(() -> service.findByEvent(eventId, organizerId, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> service.findByEvent(eventId, null, organizerId, PageRequest.of(0, 20)))
                 .isInstanceOf(NotEventOrganizerException.class);
     }
 

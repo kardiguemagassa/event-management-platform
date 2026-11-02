@@ -10,6 +10,8 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
 
     Page<Registration> findByEventId(UUID eventId, Pageable pageable);
 
+    Page<Registration> findByEventIdAndStatus(UUID eventId, RegistrationStatus status, Pageable pageable);
+
     Page<Registration> findByUserId(UUID userId, Pageable pageable);
 
     boolean existsByEventIdAndUserIdAndStatus(UUID eventId, UUID userId, RegistrationStatus status);

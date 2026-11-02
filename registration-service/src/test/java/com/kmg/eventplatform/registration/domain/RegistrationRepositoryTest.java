@@ -59,6 +59,21 @@ class RegistrationRepositoryTest {
     }
 
     @Test
+    void findsTheRegistrationsOfAnEventByStatus() {
+        Registration cancelled = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        cancelled.cancel(NOW.plusSeconds(5));
+        repository.saveAndFlush(cancelled);
+        Registration confirmed = repository.saveAndFlush(
+                Registration.confirm(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW.plusSeconds(10)));
+
+        PageRequest page = PageRequest.of(0, 10);
+        assertThat(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CONFIRMED, page).getContent())
+                .extracting(Registration::getId).containsExactly(confirmed.getId());
+        assertThat(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CANCELLED, page).getContent())
+                .extracting(Registration::getId).containsExactly(cancelled.getId());
+    }
+
+    @Test
     void detectsActiveRegistrationOnly() {
         Registration registration = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
         repository.saveAndFlush(registration);

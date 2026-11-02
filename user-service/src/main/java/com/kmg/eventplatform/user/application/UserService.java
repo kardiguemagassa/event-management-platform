@@ -3,6 +3,8 @@ package com.kmg.eventplatform.user.application;
 import com.kmg.eventplatform.user.domain.User;
 import com.kmg.eventplatform.user.domain.UserRepository;
 import java.time.Clock;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.core.NestedExceptionUtils;
@@ -60,6 +62,11 @@ public class UserService {
 
     public User getById(UUID id) {
         return repository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
+    }
+
+    /** Profiles of these users; users without a profile are left out. */
+    public List<User> findAllById(Collection<UUID> ids) {
+        return repository.findAllById(ids);
     }
 
     public Page<User> list(Pageable pageable) {

@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.registration.infrastructure.client;
 
+import com.kmg.eventplatform.registration.application.AttendeeDirectory;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventCatalog;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -103,5 +104,17 @@ class DownstreamClientsConfig {
                 .requestInterceptor(serviceAccount)
                 .build();
         return new ResilientEventCatalog(new RestEventCatalog(client), resilience);
+    }
+
+    /** Calls to user-service carry the service account token (the names route needs PROFILE_READER). */
+    @Bean
+    AttendeeDirectory attendeeDirectory(@LoadBalanced RestClient.Builder loadBalanced,
+                                        DownstreamClientsProperties properties, DownstreamResilience resilience,
+                                        ServiceAccountTokenInterceptor serviceAccount) {
+        RestClient client = loadBalanced.clone()
+                .baseUrl(properties.userServiceUrl())
+                .requestInterceptor(serviceAccount)
+                .build();
+        return new ResilientAttendeeDirectory(new RestAttendeeDirectory(client), resilience);
     }
 }

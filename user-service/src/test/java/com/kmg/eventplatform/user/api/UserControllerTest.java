@@ -29,7 +29,10 @@ import com.kmg.eventplatform.user.domain.User;
 import com.kmg.eventplatform.user.infrastructure.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,6 +82,61 @@ class UserControllerTest {
     private static JwtRequestPostProcessor asAdmin() {
         return jwt().jwt(token -> token.subject(UUID.randomUUID().toString()))
                 .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+    }
+
+    private static JwtRequestPostProcessor asProfileReader() {
+        return jwt().jwt(token -> token.subject(UUID.randomUUID().toString()))
+                .authorities(new SimpleGrantedAuthority("ROLE_PROFILE_READER"));
+    }
+
+    @Test
+    void profileReaderGetsDisplayNamesOnly() throws Exception {
+        UUID unknown = UUID.randomUUID();
+        when(service.findAllById(Set.of(ADA_ID, unknown))).thenReturn(List.of(ada()));
+
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()).param("ids", ADA_ID + "," + unknown + "," + ADA_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(ADA_ID.toString()))
+                .andExpect(jsonPath("$[0].fullName").value("Ada Lovelace"))
+                .andExpect(jsonPath("$[0].email").doesNotExist());
+    }
+
+    @Test
+    void namesWithoutIdsAreAnEmptyList() throws Exception {
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void namesAreForTheProfileReaderRoleOnly() throws Exception {
+        mockMvc.perform(get("/api/users/names").with(asAda()).param("ids", ADA_ID.toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get("/api/users/names").with(asAdmin()).param("ids", ADA_ID.toString()))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void namesRejectMalformedOrTooManyIds() throws Exception {
+        String tooMany = IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID().toString())
+                .collect(Collectors.joining(","));
+
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()).param("ids", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.ids").exists());
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()).param("ids", tooMany))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.ids").exists());
+
+        verifyNoInteractions(service);
     }
 
     @Test

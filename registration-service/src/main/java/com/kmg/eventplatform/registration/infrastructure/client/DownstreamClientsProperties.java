@@ -18,6 +18,7 @@ import java.time.Duration;
 @ConfigurationProperties("registration.clients")
 public record DownstreamClientsProperties(
         @NotBlank String eventServiceUrl,
+        @NotBlank String userServiceUrl,
         @NotNull Duration connectTimeout,
         @NotNull Duration readTimeout,
         @NotNull @Valid Retry retry,

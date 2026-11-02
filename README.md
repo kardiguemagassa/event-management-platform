@@ -88,7 +88,7 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Keys from the internal JWK set, public issuer and audience checked | No discovery call at startup; a token from another realm or for another audience is rejected |
 | Identity taken from the token, never from the request | Closes IDOR: a registration is made for the caller, a profile is the caller's own, an event belongs to its creator |
 | Roles for actions, ownership for objects | `ORGANIZER` may change events, but only their own (403); objects of others that are private do not exist for the caller (404) |
-| Client credentials for service-to-service calls | `registration-service` reserves seats with its own identity (`SEAT_MANAGER`), not the user's; the token is cached and renewed |
+| Client credentials for service-to-service calls | `registration-service` reserves seats (`SEAT_MANAGER`) and reads attendee names (`PROFILE_READER`) with its own identity, not the user's; the token is cached and renewed |
 | Shared `platform-security` library, imported explicitly | One implementation of token validation, role mapping and 401/403 problems; each service keeps its own access rules |
 | OpenTelemetry through Spring Boot's starter, no Java agent | Vendor-neutral standard (OTLP): the backend can become Datadog, Dynatrace or Elastic without code change; nothing to add to the images |
 | Noise dropped before export | Health probes, Eureka heartbeats and Spring Security filter spans would bury the business traces at 100 % sampling |
@@ -105,6 +105,7 @@ the Keycloak admin console.
 | `ATTENDEE` | every new user (default role) | registering to events, cancelling one's own registrations |
 | `ORGANIZER` | by an administrator | creating events, and changing, publishing, cancelling or deleting one's own |
 | `SEAT_MANAGER` | the `registration-service` service account only | reserving and releasing seats |
+| `PROFILE_READER` | the `registration-service` service account only | reading the display names of users |
 | `ADMIN` | by an administrator | reading and deleting any user profile |
 
 | Route | Access |
@@ -115,8 +116,9 @@ the Keycloak admin console.
 | `/api/events/{id}/capacity/**` | `SEAT_MANAGER`; closed at the gateway |
 | `POST /api/registrations`, `POST /api/registrations/{id}/cancel` | `ATTENDEE`, own registrations only (others are `404`) |
 | `GET /api/registrations/me`, `GET /api/registrations/{id}` | authenticated, own registrations only |
-| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event |
+| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event; each registration carries the attendee's display name |
 | `GET` `PUT` `DELETE /api/users/me` | authenticated, one's own profile |
+| `GET /api/users/names` | `PROFILE_READER`; closed at the gateway |
 | `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN` |
 
 Clients, all issuing access tokens with the audience `event-platform-api`, checked by every service:
@@ -198,7 +200,7 @@ URI of the client.
 
 | Resource | Endpoints |
 |---|---|
-| Users (profiles) | `GET` `PUT` `DELETE` `/api/users/me`, `GET /api/users`, `GET` `DELETE` `/api/users/{id}` |
+| Users (profiles) | `GET` `PUT` `DELETE` `/api/users/me`, `GET /api/users`, `GET` `DELETE` `/api/users/{id}`, `GET /api/users/names` (used by `registration-service`) |
 | Events | `GET` `POST` `/api/events`, `GET` `PUT` `DELETE` `/api/events/{id}`, `POST /api/events/{id}/publish`, `POST /api/events/{id}/cancel`, `POST /api/events/{id}/capacity/reserve` and `.../release` (used by `registration-service`) |
 | Registrations | `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/{id}`, `POST /api/registrations/{id}/cancel`, `GET /api/registrations/events/{eventId}` |
 
@@ -280,7 +282,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (42 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (45 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - browser session (BFF): login scripted on the Keycloak page through the gateway, `/bff/me` with the realm roles, an API
