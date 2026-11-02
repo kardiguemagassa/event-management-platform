@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
  * Role rules of event-service (the gateway checks the token too: zero trust). Ownership of an event is checked
@@ -25,6 +27,8 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.FORWARD).permitAll()
                         // Seat reservation: service account of registration-service only.
                         .requestMatchers("/api/events/*/capacity/**").hasRole("SEAT_MANAGER")
+                        // "My events" of an organizer, drafts included: the role, not just a token.
+                        .requestMatchers(organizerOwnEvents()).hasRole("ORGANIZER")
                         // The catalog is public; drafts are filtered by the application layer.
                         .requestMatchers(HttpMethod.GET, "/api/events", "/api/events/*").permitAll()
                         .requestMatchers("/api/events", "/api/events/**").hasRole("ORGANIZER")
@@ -35,5 +39,11 @@ public class SecurityConfig {
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         .anyRequest().denyAll())
                 .build();
+    }
+
+    /** {@code GET /api/events?organizer=...}: same path as the public catalog, told apart by its query parameter. */
+    private static RequestMatcher organizerOwnEvents() {
+        RequestMatcher catalog = PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/events");
+        return request -> catalog.matches(request) && request.getParameter("organizer") != null;
     }
 }

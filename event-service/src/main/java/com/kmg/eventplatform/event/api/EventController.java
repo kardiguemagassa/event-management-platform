@@ -5,15 +5,20 @@ import static com.kmg.eventplatform.event.infrastructure.openapi.OpenApiResponse
 import static com.kmg.eventplatform.event.infrastructure.openapi.OpenApiResponses.FORBIDDEN;
 import static com.kmg.eventplatform.event.infrastructure.openapi.OpenApiResponses.NOT_FOUND;
 
+import com.kmg.eventplatform.event.application.EventSearch;
 import com.kmg.eventplatform.event.application.EventService;
 import com.kmg.eventplatform.event.domain.Event;
 import com.kmg.eventplatform.event.domain.EventStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.springdoc.core.annotations.ParameterObject;
@@ -43,6 +48,12 @@ public class EventController {
 
     /** Only these properties may be used for sorting (whitelist: predictable, index-backed queries). */
     private static final Set<String> SORTABLE_PROPERTIES = Set.of("startAt", "createdAt", "title");
+
+    /** Only accepted value of the organizer filter; the security configuration requires ORGANIZER for it. */
+    static final String ORGANIZER_ME = "me";
+
+    private static final int MAX_TEXT_LENGTH = 100;
+    private static final int MAX_IDS = 100;
 
     private final EventService service;
 
@@ -76,18 +87,34 @@ public class EventController {
     }
 
     @Operation(summary = "List events",
-            description = "Paginated (default size 20, max 100), optionally filtered by status. "
-                    + "Public events plus the caller's own drafts. Sortable by: startAt (default, asc), createdAt, title.")
+            description = "Paginated (default size 20, max 100). Public events plus the caller's own drafts; filters "
+                    + "are optional and combined with AND. Sortable by: startAt (default, asc), createdAt, title.")
     @ApiResponse(responseCode = "200", description = "Page of events")
     @ApiResponse(responseCode = "400", ref = BAD_REQUEST)
+    @ApiResponse(responseCode = "401", description = "organizer=me without a token")
+    @ApiResponse(responseCode = "403", description = "organizer=me without the ORGANIZER role")
     @GetMapping
     public PageResponse<EventResponse> list(
-            @Parameter(description = "Optional status filter") @RequestParam(required = false) EventStatus status,
+            @Parameter(description = "Only events in this status") @RequestParam(required = false) EventStatus status,
+            @Parameter(description = "Title or location containing this text, case-insensitive (max "
+                    + MAX_TEXT_LENGTH + " characters)", example = "paris")
+            @RequestParam(required = false) String q,
+            @Parameter(description = "Only events starting at or after this instant (ISO-8601)",
+                    example = "2026-12-01T00:00:00Z")
+            @RequestParam(required = false) Instant from,
+            @Parameter(description = "`me`: every event of the caller, drafts and cancelled ones included "
+                    + "(ORGANIZER role)", schema = @Schema(allowableValues = ORGANIZER_ME))
+            @RequestParam(required = false) String organizer,
+            @Parameter(description = "Only these events (batch read, max " + MAX_IDS + " ids, comma-separated); "
+                    + "events the caller cannot see are left out")
+            @RequestParam(required = false) List<UUID> ids,
             @ParameterObject
             @PageableDefault(size = 20, sort = "startAt", direction = Sort.Direction.ASC) Pageable pageable,
             @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
         validateSort(pageable.getSort());
-        return PageResponse.from(service.list(status, userIdOrNull(caller), pageable).map(EventResponse::from));
+        validateText(q);
+        EventSearch search = new EventSearch(status, q, from, mine(organizer), idSet(ids));
+        return PageResponse.from(service.list(search, userIdOrNull(caller), pageable).map(EventResponse::from));
     }
 
     @Operation(summary = "Replace an event", description = "Full replacement. Not allowed once cancelled; "
@@ -146,6 +173,33 @@ public class EventController {
     /** Keycloak user id of the caller, {@code null} when anonymous (public routes). */
     private static UUID userIdOrNull(Jwt caller) {
         return caller == null ? null : userId(caller);
+    }
+
+    private static boolean mine(String organizer) {
+        if (organizer == null) {
+            return false;
+        }
+        if (!ORGANIZER_ME.equals(organizer)) {
+            throw new InvalidQueryParameterException("organizer", "Only 'me' is supported");
+        }
+        return true;
+    }
+
+    private static Set<UUID> idSet(List<UUID> ids) {
+        if (ids == null) {
+            return null;
+        }
+        Set<UUID> distinct = new HashSet<>(ids);
+        if (distinct.size() > MAX_IDS) {
+            throw new InvalidQueryParameterException("ids", "At most " + MAX_IDS + " ids");
+        }
+        return distinct;
+    }
+
+    private static void validateText(String q) {
+        if (q != null && q.strip().length() > MAX_TEXT_LENGTH) {
+            throw new InvalidQueryParameterException("q", "At most " + MAX_TEXT_LENGTH + " characters");
+        }
     }
 
     private static void validateSort(Sort sort) {

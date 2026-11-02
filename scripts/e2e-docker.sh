@@ -171,6 +171,19 @@ check "token issued by another realm" 401 UNAUTHENTICATED
 AUTH=none call GET "/api/events/$E"; check "anonymous read of the public catalog" 200
 call POST "/api/events/$E/capacity/reserve" '{}'; check "internal capacity route closed at the edge" 403 ACCESS_DENIED
 
+echo "== Catalog filters"
+# The search texts are percent-encoded by hand: call() passes the path as is.
+count() { python3 -c 'import json,sys;print(len(json.loads(sys.argv[1])["content"]))' "$BODY" 2>/dev/null; }
+AUTH=none call GET "/api/events?q=docker%20day&from=2027-03-15T18:00:00Z&ids=$E"
+[ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  search by text, start and ids finds the event"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  catalog search -> $CODE body=$BODY"; }
+AUTH=none call GET "/api/events?q=docker%20day&from=2027-03-15T18:00:01Z"
+[ "$CODE" = 200 ] && [ "$(count)" = 0 ] && { PASS=$((PASS+1)); echo "PASS  events starting earlier are left out"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  catalog from filter -> $CODE body=$BODY"; }
+call GET "/api/events?organizer=me&status=DRAFT"; check "organizer lists their own drafts" 200
+AUTH=$(attendee_token 1) call GET "/api/events?organizer=me"; check "own events need the ORGANIZER role" 403 ACCESS_DENIED
+AUTH=none call GET "/api/events?from=tomorrow"; check "malformed filter" 400 VALIDATION_FAILED
+
 # What a browser does, scripted: sign in on the Keycloak page through the gateway (BFF), then call the API with the
 # session cookie only. On localhost: the address registered as redirect URI of the event-platform-bff client.
 echo "== Browser session (BFF)"

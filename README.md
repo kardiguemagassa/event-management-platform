@@ -110,6 +110,7 @@ the Keycloak admin console.
 | Route | Access |
 |---|---|
 | `GET /api/events`, `GET /api/events/{id}` | public; a draft is visible to its organizer only |
+| `GET /api/events?organizer=me` | `ORGANIZER`: every event of the caller, drafts and cancelled ones included |
 | other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`) |
 | `/api/events/{id}/capacity/**` | `SEAT_MANAGER`; closed at the gateway |
 | `POST /api/registrations`, `POST /api/registrations/{id}/cancel` | `ATTENDEE`, own registrations only (others are `404`) |
@@ -201,6 +202,19 @@ URI of the client.
 | Events | `GET` `POST` `/api/events`, `GET` `PUT` `DELETE` `/api/events/{id}`, `POST /api/events/{id}/publish`, `POST /api/events/{id}/cancel`, `POST /api/events/{id}/capacity/reserve` and `.../release` (used by `registration-service`) |
 | Registrations | `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/{id}`, `POST /api/registrations/{id}/cancel`, `GET /api/registrations/events/{eventId}` |
 
+`GET /api/events` takes optional filters, combined with AND, on top of pagination (`page`, `size` up to 100) and
+sorting (`sort=startAt|createdAt|title[,asc|desc]`):
+
+| Parameter | Filter |
+|---|---|
+| `status` | `DRAFT`, `PUBLISHED` or `CANCELLED` |
+| `q` | title or location containing the text, case-insensitive (100 characters max) |
+| `from` | events starting at or after this instant, ISO-8601 (`2026-12-01T00:00:00Z`) |
+| `organizer=me` | the caller's own events, whatever their status (`ORGANIZER` role) |
+| `ids` | batch read of up to 100 events, comma-separated; events the caller cannot see are left out |
+
+A malformed or out-of-range filter is a `400 VALIDATION_FAILED` naming the parameter in `errors`.
+
 Errors are RFC 9457 problem details with a stable `code` (the HTTP status of each case is listed in the Swagger UI):
 
 | Category | Codes |
@@ -266,7 +280,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (37 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (42 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - browser session (BFF): login scripted on the Keycloak page through the gateway, `/bff/me` with the realm roles, an API

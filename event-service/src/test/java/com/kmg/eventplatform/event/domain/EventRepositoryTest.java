@@ -1,5 +1,11 @@
 package com.kmg.eventplatform.event.domain;
 
+import static com.kmg.eventplatform.event.domain.EventSpecifications.hasStatus;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.idIn;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.organizedBy;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.startsAtOrAfter;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.titleOrLocationContains;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.visibleTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -9,6 +15,8 @@ import jakarta.persistence.PersistenceException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +24,7 @@ import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 @DataJpaTest(showSql = false)
 @Import(TestcontainersConfiguration.class)
@@ -63,40 +72,90 @@ class EventRepositoryTest {
         assertThat(reloaded.getOrganizerId()).isEqualTo(ORGANIZER);
     }
 
+    private Event savePublished(String title, String location, Instant startAt, UUID organizer) {
+        Event event = Event.create(new EventDetails(title, null, location, startAt, 10), organizer, NOW);
+        event.publish(NOW);
+        return repository.saveAndFlush(event);
+    }
+
+    private List<UUID> ids(Specification<Event> criteria) {
+        return repository.findAll(criteria, PageRequest.of(0, 100, Sort.by("startAt"))).map(Event::getId).getContent();
+    }
+
     @Test
     void visibleEventsExcludeTheDraftsOfOtherOrganizers() {
         UUID viewer = UUID.randomUUID();
         Event ownDraft = saveEvent(10, viewer);
         Event otherDraft = saveEvent(10, UUID.randomUUID());
-        Event published = saveEvent(10, UUID.randomUUID());
-        published.publish(NOW);
-        repository.saveAndFlush(published);
+        Event published = savePublished("Spring Meetup", "Paris", NEXT_MONTH, UUID.randomUUID());
 
-        var visible = repository.findVisibleTo(viewer, EventStatus.DRAFT, PageRequest.of(0, 100, Sort.by("startAt")));
-        var anonymous = repository.findByStatusNot(EventStatus.DRAFT, PageRequest.of(0, 100));
-        var ownDrafts = repository.findByStatusAndOrganizerId(EventStatus.DRAFT, viewer, PageRequest.of(0, 100));
-
-        assertThat(visible.getContent()).extracting(Event::getId)
+        assertThat(ids(visibleTo(viewer)))
                 .contains(ownDraft.getId(), published.getId())
                 .doesNotContain(otherDraft.getId());
-        assertThat(anonymous.getContent()).extracting(Event::getId)
+        assertThat(ids(visibleTo(null)))
                 .contains(published.getId())
                 .doesNotContain(ownDraft.getId(), otherDraft.getId());
-        assertThat(ownDrafts.getContent()).extracting(Event::getId).containsExactly(ownDraft.getId());
+        assertThat(ids(Specification.allOf(visibleTo(viewer), hasStatus(EventStatus.DRAFT))))
+                .containsExactly(ownDraft.getId());
     }
 
     @Test
-    void findsEventsByStatus() {
-        Event draft = saveEvent(10);
-        Event published = saveEvent(10);
-        published.publish(NOW);
-        repository.saveAndFlush(published);
+    void organizerSeesEveryOwnEventWhateverItsStatus() {
+        UUID organizer = UUID.randomUUID();
+        Event draft = saveEvent(10, organizer);
+        Event cancelled = savePublished("Spring Meetup", "Paris", NEXT_MONTH, organizer);
+        cancelled.cancel();
+        repository.saveAndFlush(cancelled);
+        saveEvent(10, UUID.randomUUID());
 
-        var page = repository.findByStatus(EventStatus.PUBLISHED, PageRequest.of(0, 10, Sort.by("startAt")));
+        assertThat(ids(organizedBy(organizer))).containsExactlyInAnyOrder(draft.getId(), cancelled.getId());
+    }
 
-        assertThat(page.getContent()).extracting(Event::getId)
-                .contains(published.getId())
-                .doesNotContain(draft.getId());
+    @Test
+    void textMatchesTitleOrLocationIgnoringCase() {
+        UUID organizer = UUID.randomUUID();
+        Event byTitle = savePublished("Kafka en pratique", "Lyon", NEXT_MONTH, organizer);
+        Event byLocation = savePublished("Spring Day", "Paris, Station F", NEXT_MONTH, organizer);
+        savePublished("Angular", "Nantes", NEXT_MONTH, organizer);
+
+        assertThat(ids(Specification.allOf(organizedBy(organizer), titleOrLocationContains("KAFKA"))))
+                .containsExactly(byTitle.getId());
+        assertThat(ids(Specification.allOf(organizedBy(organizer), titleOrLocationContains("station"))))
+                .containsExactly(byLocation.getId());
+    }
+
+    @Test
+    void likeWildcardsInTheTextMatchLiterally() {
+        UUID organizer = UUID.randomUUID();
+        Event discount = savePublished("Promo 100% gratuite", "Paris", NEXT_MONTH, organizer);
+        savePublished("Promo 100 places", "Paris", NEXT_MONTH, organizer);
+
+        assertThat(ids(Specification.allOf(organizedBy(organizer), titleOrLocationContains("100%"))))
+                .containsExactly(discount.getId());
+        assertThat(ids(Specification.allOf(organizedBy(organizer), titleOrLocationContains("_"))))
+                .isEmpty();
+    }
+
+    @Test
+    void fromKeepsEventsStartingAtOrAfterTheInstant() {
+        UUID organizer = UUID.randomUUID();
+        Instant later = NEXT_MONTH.plus(Duration.ofDays(10));
+        savePublished("Soon", "Paris", NEXT_MONTH, organizer);
+        Event onTheDot = savePublished("On the dot", "Paris", later, organizer);
+        Event after = savePublished("After", "Paris", later.plus(Duration.ofDays(1)), organizer);
+
+        assertThat(ids(Specification.allOf(organizedBy(organizer), startsAtOrAfter(later))))
+                .containsExactly(onTheDot.getId(), after.getId());
+    }
+
+    @Test
+    void batchReadKeepsTheVisibilityRules() {
+        Event published = savePublished("Spring Meetup", "Paris", NEXT_MONTH, UUID.randomUUID());
+        Event otherDraft = saveEvent(10, UUID.randomUUID());
+        saveEvent(10, UUID.randomUUID());
+
+        assertThat(ids(Specification.allOf(visibleTo(null), idIn(Set.of(published.getId(), otherDraft.getId())))))
+                .containsExactly(published.getId());
     }
 
     @Test
