@@ -223,6 +223,9 @@ sorting (`sort=startAt|createdAt|title[,asc|desc]`):
 
 A malformed or out-of-range filter is a `400 VALIDATION_FAILED` naming the parameter in `errors`.
 
+`GET /api/registrations/me` takes `eventId` and `status` (`CONFIRMED`, `CANCELLED`): with both, it tells whether the
+caller is registered to an event, which the event page uses.
+
 Errors are RFC 9457 problem details with a stable `code` (the HTTP status of each case is listed in the Swagger UI):
 
 | Category | Codes |
@@ -295,7 +298,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (48 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (50 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -306,7 +309,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (48 c
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
   attendee cancelling a registration (`404`);
-- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation;
+- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation, an attendee finding
+  their registration to an event; the event is cancelled at the end so that runs do not pile up in the catalogue;
 - resilience: `event-service` outage (fast `503` once the instance has left discovery, gateway fallback), recovery after restart,
   and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
@@ -441,7 +445,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application, catalogue first (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue and event page with registration (done), my registrations, profile, organizer screens (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

@@ -15,6 +15,8 @@ const PATHS: Record<string, string> = {
   login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
+  back: '<path d="M15 18l-6-6 6-6"/>',
+  forward: '<path d="M9 18l6-6-6-6"/>',
 };
 
 export function svgOf(paths: string): string {

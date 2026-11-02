@@ -8,6 +8,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -16,6 +17,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.sql.SQLException;
 import java.time.Clock;
@@ -28,6 +30,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -282,9 +285,18 @@ class RegistrationServiceTest {
     void attendeeListsOwnRegistrations() {
         Pageable pageable = PageRequest.of(0, 20);
         Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
-        when(repository.findByUserId(userId, pageable)).thenReturn(page);
+        when(repository.findAll(ArgumentMatchers.<Specification<Registration>>any(), eq(pageable))).thenReturn(page);
 
-        assertThat(service.findByUser(userId, pageable)).isSameAs(page);
+        assertThat(service.findByUser(userId, null, null, pageable)).isSameAs(page);
+    }
+
+    @Test
+    void attendeeChecksTheirRegistrationToOneEvent() {
+        Pageable pageable = PageRequest.of(0, 1);
+        Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
+        when(repository.findAll(ArgumentMatchers.<Specification<Registration>>any(), eq(pageable))).thenReturn(page);
+
+        assertThat(service.findByUser(userId, eventId, RegistrationStatus.CONFIRMED, pageable)).isSameAs(page);
     }
 
     private Registration confirmedRegistration() {

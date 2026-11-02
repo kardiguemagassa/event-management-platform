@@ -140,12 +140,32 @@ class RegistrationControllerTest {
 
     @Test
     void mineListsTheCallersRegistrations() throws Exception {
-        when(service.findByUser(eq(userId), argThat(newestFirst())))
+        when(service.findByUser(eq(userId), isNull(), isNull(), argThat(newestFirst())))
                 .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/api/registrations/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].userId").value(userId.toString()));
+    }
+
+    @Test
+    void mineFiltersByEventAndStatus() throws Exception {
+        when(service.findByUser(eq(userId), eq(eventId), eq(RegistrationStatus.CONFIRMED), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/registrations/me").param("eventId", eventId.toString()).param("status", "CONFIRMED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(registration.getId().toString()));
+    }
+
+    @Test
+    void mineRejectsAMalformedEventId() throws Exception {
+        mockMvc.perform(get("/api/registrations/me").param("eventId", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.eventId").exists());
+
+        verifyNoInteractions(service);
     }
 
     @Test

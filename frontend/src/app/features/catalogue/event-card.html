@@ -20,5 +20,11 @@
   >
     <span [class]="seats().tone" [style.width.%]="seats().booked"></span>
   </div>
-  <p class="seats">{{ seatsLabel() }}</p>
+  <div class="footer">
+    <p class="seats">{{ seatsLabel() }}</p>
+    <span class="cta" aria-hidden="true">
+      {{ seats().tone === 'full' ? 'Voir le détail' : "Voir et s'inscrire" }}
+      <mat-icon svgIcon="forward" />
+    </span>
+  </div>
 </article>

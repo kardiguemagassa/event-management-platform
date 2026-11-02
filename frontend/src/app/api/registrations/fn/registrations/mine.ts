@@ -11,6 +11,16 @@ import { PageResponseRegistrationResponse } from '../../models/page-response-reg
 
 export interface Mine$Params {
   /**
+   * Only the registrations to this event
+   */
+  eventId?: string;
+
+  /**
+   * Only registrations in this status
+   */
+  status?: 'CONFIRMED' | 'CANCELLED';
+
+  /**
    * Zero-based page index (0..N)
    */
   page?: number;
@@ -34,6 +44,8 @@ export function mine(
 ): Observable<StrictHttpResponse<PageResponseRegistrationResponse>> {
   const rb = new RequestBuilder(rootUrl, mine.PATH, 'get');
   if (params) {
+    rb.query('eventId', params.eventId, {});
+    rb.query('status', params.status, {});
     rb.query('page', params.page, {});
     rb.query('size', params.size, {});
     rb.query('sort', params.sort, {});

@@ -17,7 +17,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { debounceTime, distinctUntilChanged, map } from 'rxjs';
 import { EventsApi } from '../../api/events/events-api';
 import { list } from '../../api/events/fn/events/list';
@@ -43,6 +43,7 @@ const MAX_SEARCH_LENGTH = 100;
     MatInputModule,
     MatPaginatorModule,
     MatProgressBarModule,
+    RouterLink,
     EventCard,
   ],
   templateUrl: './catalogue-page.html',

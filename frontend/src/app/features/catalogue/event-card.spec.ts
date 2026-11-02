@@ -34,6 +34,7 @@ describe('EventCard', () => {
     expect(card.querySelector('.badge')?.textContent).toBe('Places disponibles');
     expect(card.querySelector('.seats')?.textContent).toBe('52 places restantes');
     expect(card.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('74');
+    expect(card.querySelector('.cta')?.textContent?.trim()).toBe("Voir et s'inscrire");
   });
 
   it('flags a full event', () => {
@@ -41,5 +42,6 @@ describe('EventCard', () => {
 
     expect(card.querySelector('.badge')?.classList).toContain('full');
     expect(card.querySelector('.seats')?.textContent).toBe('Complet');
+    expect(card.querySelector('.cta')?.textContent?.trim()).toBe('Voir le détail');
   });
 });

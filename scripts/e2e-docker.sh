@@ -172,7 +172,7 @@ AUTH=none call GET "/api/events/$E"; check "anonymous read of the public catalog
 call POST "/api/events/$E/capacity/reserve" '{}'; check "internal capacity route closed at the edge" 403 ACCESS_DENIED
 
 echo "== Catalog filters"
-# The search texts are percent-encoded by hand: call() passes the path as is.
+# The search texts are percent-encoded by hand: call() passes the path as is. count: elements of a page.
 count() { python3 -c 'import json,sys;print(len(json.loads(sys.argv[1])["content"]))' "$BODY" 2>/dev/null; }
 AUTH=none call GET "/api/events?q=docker%20day&from=2027-03-15T18:00:00Z&ids=$E"
 [ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  search by text, start and ids finds the event"; } \
@@ -246,6 +246,9 @@ check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
 register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
 AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; echo "      cancel attendee 1 -> $CODE"
 register 3; check "register attendee 3 on freed seat" 201
+AUTH=$(attendee_token 3) call GET "/api/registrations/me?eventId=$E&status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  attendee finds their registration to the event"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  registration to the event -> $CODE body=$BODY"; }
 # Started in a known trace: its log line is looked up in Loki below.
 LOG_TRACE_ID=$(openssl rand -hex 16)
 TRACEPARENT="00-$LOG_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
@@ -348,6 +351,13 @@ call GET "/api/registrations/events/$E?status=CONFIRMED"
 [ "$CODE" = 200 ] && [ "$(names)" = "Attendee 3,None" ] \
   && { PASS=$((PASS+1)); echo "PASS  a deleted profile leaves the registration listed without a name"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  name of a deleted profile -> $CODE body=$BODY"; }
+
+# Each run leaves its event cancelled: it no longer shows in the catalogue of published events.
+echo "== Cleanup"
+call POST "/api/events/$E/cancel"
+AUTH=none call GET "/api/events?status=PUBLISHED&ids=$E"
+[ "$CODE" = 200 ] && [ "$(count)" = 0 ] && { PASS=$((PASS+1)); echo "PASS  cancelled event left the catalogue"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  cancelled event still listed -> $CODE body=$BODY"; }
 
 echo "== Result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
