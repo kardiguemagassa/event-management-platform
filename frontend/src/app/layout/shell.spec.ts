@@ -29,6 +29,18 @@ describe('Shell', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
+  it('links the catalogue and my registrations', () => {
+    const view = render();
+    const links = [...view.querySelectorAll('.top-nav a')].map((a) => [
+      a.textContent?.trim(),
+      a.getAttribute('href'),
+    ]);
+    expect(links).toEqual([
+      ['Catalogue', '/'],
+      ['Inscriptions', '/mes-inscriptions'],
+    ]);
+  });
+
   it('offers to sign in, back to the current page', async () => {
     const view = render();
     await TestBed.inject(Router).navigateByUrl('/?q=paris');

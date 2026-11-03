@@ -36,7 +36,11 @@ export class Shell {
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
 
-  protected readonly navItems: NavItem[] = [{ label: 'Catalogue', icon: 'calendar', link: '/' }];
+  protected readonly navItems: NavItem[] = [
+    { label: 'Catalogue', icon: 'calendar', link: '/' },
+    // Signed-in only: an anonymous visitor goes through the login first (guard), then lands here.
+    { label: 'Inscriptions', icon: 'registrations', link: '/mes-inscriptions' },
+  ];
   protected readonly signingOut = signal(false);
 
   protected login(): void {

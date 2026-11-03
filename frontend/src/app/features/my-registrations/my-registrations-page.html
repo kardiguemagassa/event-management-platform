@@ -1,0 +1,77 @@
+<header class="page-header">
+  <h1>Mes inscriptions</h1>
+</header>
+
+<mat-button-toggle-group
+  class="periods"
+  aria-label="Période"
+  [value]="period()"
+  (change)="choosePeriod($event)"
+  hideSingleSelectionIndicator
+>
+  <mat-button-toggle value="a-venir">
+    À venir
+    @if (split(); as s) {
+      ({{ s.upcoming.length }})
+    }
+  </mat-button-toggle>
+  <mat-button-toggle value="passees">
+    Passées
+    @if (split(); as s) {
+      ({{ s.past.length }})
+    }
+  </mat-button-toggle>
+</mat-button-toggle-group>
+
+@if (registrations.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Chargement de tes inscriptions" />
+}
+
+<section aria-live="polite">
+  @if (errorMessage(); as message) {
+    <div class="state" role="alert">
+      <p>{{ message }}</p>
+      <button mat-stroked-button type="button" (click)="registrations.reload()">Réessayer</button>
+    </div>
+  } @else if (registrations.hasValue()) {
+    @if (shown().length) {
+      <ul class="list">
+        @for (item of shown(); track item.registration.id) {
+          <li>
+            <a class="item" [routerLink]="['/evenements', item.event.id]">
+              <span class="day" aria-hidden="true">
+                <span class="number">{{ item.event.startAt | date: 'dd' }}</span>
+                <span class="month">{{ item.event.startAt | date: 'MMM' }}</span>
+              </span>
+              <span class="text">
+                <span class="title">{{ item.event.title }}</span>
+                <span class="where">
+                  <time [attr.datetime]="item.event.startAt">{{
+                    item.event.startAt | date: 'EEEE d MMMM · HH:mm'
+                  }}</time>
+                  · {{ item.event.location }}
+                </span>
+              </span>
+              @if (item.event.status === 'CANCELLED') {
+                <span class="badge cancelled">Événement annulé</span>
+              } @else if (period() === 'passees') {
+                <span class="badge ended">Terminé</span>
+              } @else {
+                <span class="badge confirmed">Confirmée</span>
+              }
+            </a>
+          </li>
+        }
+      </ul>
+    } @else {
+      <div class="state">
+        @if (period() === 'passees') {
+          <p>Aucune inscription passée pour le moment.</p>
+        } @else {
+          <p>Tu n'es inscrit à aucun événement à venir.</p>
+          <a mat-flat-button routerLink="/">Voir les événements</a>
+        }
+      </div>
+    }
+  }
+</section>

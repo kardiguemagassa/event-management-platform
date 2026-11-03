@@ -187,6 +187,17 @@ describe('EventDetailPage', () => {
     expect(button('Annuler mon inscription')).toBeDefined();
   });
 
+  it('still offers to register when the registration check fails', async () => {
+    authenticated.set(true);
+    await harness.navigateByUrl('/evenements/e1');
+    expectEvent().flush(EVENT);
+    expectMine().flush(null, { status: 503, statusText: '' });
+    await elapse();
+
+    expect(text('h1')).toBe('Spring Boot Day');
+    expect(button("S'inscrire")).toBeDefined();
+  });
+
   it.each([
     [{ status: 'CANCELLED' as const }, 'Cet événement est annulé.'],
     [{ status: 'DRAFT' as const }, "Brouillon : visible par toi seul tant qu'il n'est pas publié."],

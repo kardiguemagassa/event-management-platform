@@ -440,12 +440,14 @@ pull request would change `main` directly and require merging `main` back into `
   balancer caches catch up (short intervals in the `docker` profile; production defaults are longer).
 - **Swagger UI is always enabled**: it should be disabled in production (`springdoc.swagger-ui.enabled=false`).
 - **Gateway branch coverage is 64 %**: the error branches of its filters are the next tests to write.
+- **"Mes inscriptions" lists the 100 most recent registrations**: one page of registrations and one batch read of
+  their events (the API limits both to 100); paging through older ones is not offered yet.
 
 ## Roadmap
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue and event page with registration (done), my registrations, profile, organizer screens (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations (done), profile, organizer screens (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |
