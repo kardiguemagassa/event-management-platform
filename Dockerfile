@@ -28,6 +28,7 @@ RUN test -n "${MODULE}" || (echo "Build argument MODULE is required" && exit 1)
 COPY pom.xml ./
 COPY platform-security/pom.xml platform-security/
 COPY platform-observability/pom.xml platform-observability/
+COPY platform-messaging/pom.xml platform-messaging/
 COPY discovery-server/pom.xml discovery-server/
 COPY api-gateway/pom.xml api-gateway/
 COPY user-service/pom.xml user-service/
@@ -39,6 +40,7 @@ RUN --mount=type=cache,target=/root/.m2 \
 # Shared libraries, built with the services that use them by --also-make (ignored by the others).
 COPY platform-security/src platform-security/src
 COPY platform-observability/src platform-observability/src
+COPY platform-messaging/src platform-messaging/src
 COPY ${MODULE}/src ${MODULE}/src
 # Declared after the dependency download: a new version does not invalidate that cached layer.
 ARG REVISION=0.0.0-SNAPSHOT
