@@ -4,8 +4,8 @@ name: event-platform
 # "docker compose up -d" still starts the databases only (services run from the IDE), while
 # "docker compose --profile app up -d --build" starts the whole platform.
 # Images are ${IMAGE_NAMESPACE:-local}/event-platform-<service>:${IMAGE_TAG:-dev}. To run a published release:
-#   IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0.0 docker compose --profile app pull
-#   IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0.0 docker compose --profile app up -d --no-build
+#   IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0 docker compose --profile app pull
+#   IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0 docker compose --profile app up -d --no-build
 x-spring-service: &spring-service
   profiles: [app]
   restart: unless-stopped

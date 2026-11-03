@@ -10,6 +10,11 @@ RUN npm run build
 
 # Runtime stage: static files behind nginx, non-root (port 8080), no Node.js.
 FROM nginxinc/nginx-unprivileged:1.29-alpine
+# Alpine publishes security fixes before the base image is rebuilt: apply them at build time (as root, then back to the
+# unprivileged user of the image), so that the release scan does not depend on the upstream rebuild schedule.
+USER root
+RUN apk upgrade --no-cache
+USER 101
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /workspace/dist/event-platform-web/browser /usr/share/nginx/html
