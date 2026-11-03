@@ -155,6 +155,26 @@ browser an `HttpOnly` session cookie only (OAuth 2.0 for Browser-Based Apps, BFF
 - **Bearer tokens still work** next to sessions (Swagger UI, API clients, tests): one gateway, two ways in.
 - **Sessions in memory**: one gateway instance. Several replicas would share them through Spring Session and Redis.
 
+### Login pages (Keycloak theme)
+
+The sign-in and sign-up pages are Keycloak's own (the password never reaches the application), with the look of the
+web application: theme `event-platform` in `keycloak/themes`, mounted into the container and selected in the realm
+(`loginTheme`, French as the only and default language).
+
+- It extends Keycloak's plain `base` theme: the forms, their CSRF protection and the brute-force detection stay
+  Keycloak's; only `template.ftl` is overridden (brand, lead, link back to the application), plus a stylesheet, the
+  French wording of the application and the fonts, served by Keycloak itself.
+- Upgrading Keycloak: compare `template.ftl` with `themes/src/main/resources/theme/base/login/template.ftl` of the new
+  version (the three changes are marked "Event Platform").
+- A realm imported before the theme keeps its settings (an import never overwrites a realm). To apply them:
+
+```bash
+docker compose exec keycloak sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 \
+  --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null &&
+  /opt/keycloak/bin/kcadm.sh update realms/event-platform -s loginTheme=event-platform \
+    -s internationalizationEnabled=true -s "supportedLocales=[\"fr\"]" -s defaultLocale=fr'
+```
+
 ## Observability
 
 Each request gets a trace, propagated with the W3C `traceparent` header from the gateway to the services
@@ -300,12 +320,12 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (58 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (59 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
   gateway on the same origin;
-- browser session (BFF): login scripted on the Keycloak page through the gateway, `/bff/me` with the realm roles, an API
+- browser session (BFF): login page served with the platform theme, login scripted on it through the gateway, `/bff/me` with the realm roles, an API
   call with the session cookie only (token relayed), a write refused without the CSRF token, logout;
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
@@ -437,6 +457,9 @@ pull request would change `main` directly and require merging `main` back into `
   registration, the seat stays reserved. A transactional outbox with a message broker would make the saga reliable.
 - **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
   behind TLS, a fixed hostname and an external database for high availability.
+- **No "forgot password" and no "remember me"**: resetting a password sends an e-mail, and the platform has no mail
+  server yet; long sessions are not offered on purpose. Keycloak's messages not reworded by the theme (rare pages) keep
+  its formal French ("vous").
 - **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console. Roles are not
   managed from the application: it would take a service account allowed to manage the users of the realm, the most
   sensitive privilege of the platform.
@@ -460,7 +483,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end test (Playwright) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |
