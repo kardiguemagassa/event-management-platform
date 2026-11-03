@@ -11,7 +11,7 @@ class EventSearchTest {
 
     @Test
     void blankTextAndEmptyIdsMeanNoFilter() {
-        EventSearch search = new EventSearch(null, "   ", null, false, Set.of());
+        EventSearch search = new EventSearch(null, "   ", null, null, Set.of());
 
         assertThat(search).isEqualTo(EventSearch.all());
     }
@@ -20,7 +20,7 @@ class EventSearchTest {
     void textIsTrimmedAndIdsAreCopied() {
         Set<UUID> ids = new HashSet<>(Set.of(UUID.randomUUID()));
 
-        EventSearch search = new EventSearch(null, "  Paris ", null, false, ids);
+        EventSearch search = new EventSearch(null, "  Paris ", null, EventSearch.Scope.VISIBLE, ids);
         ids.clear();
 
         assertThat(search.text()).isEqualTo("Paris");

@@ -132,15 +132,24 @@ class EventServiceTest {
 
         @Test
         void composesEveryFilter() {
-            EventSearch search = new EventSearch(EventStatus.PUBLISHED, "paris", NOW, true, Set.of(UUID.randomUUID()));
+            EventSearch search = new EventSearch(EventStatus.PUBLISHED, "paris", NOW, EventSearch.Scope.MINE,
+                    Set.of(UUID.randomUUID()));
             when(repository.findAll(ArgumentMatchers.<Specification<Event>>any(), eq(pageable))).thenReturn(page);
 
             assertThat(service.list(search, ORGANIZER, pageable)).isSameAs(page);
         }
 
         @Test
+        void everyEventForAnAdministrator() {
+            EventSearch everything = new EventSearch(null, null, null, EventSearch.Scope.ALL, null);
+            when(repository.findAll(ArgumentMatchers.<Specification<Event>>any(), eq(pageable))).thenReturn(page);
+
+            assertThat(service.list(everything, UUID.randomUUID(), pageable)).isSameAs(page);
+        }
+
+        @Test
         void ownEventsRequireAViewer() {
-            EventSearch mine = new EventSearch(null, null, null, true, null);
+            EventSearch mine = new EventSearch(null, null, null, EventSearch.Scope.MINE, null);
 
             assertThatThrownBy(() -> service.list(mine, null, pageable)).isInstanceOf(NullPointerException.class);
             verifyNoInteractions(repository);
@@ -176,6 +185,37 @@ class EventServiceTest {
 
             assertThatThrownBy(() -> service.update(legacy.getId(), DETAILS, ORGANIZER))
                     .isInstanceOf(NotEventOrganizerException.class);
+        }
+    }
+
+    @Nested
+    class Moderation {
+
+        private final UUID administrator = UUID.randomUUID();
+
+        @Test
+        void administratorCancelsTheEventOfAnyOrganizer() {
+            Event event = existingPublished();
+
+            assertThat(service.cancelAsAdministrator(event.getId(), administrator).getStatus())
+                    .isEqualTo(EventStatus.CANCELLED);
+        }
+
+        @Test
+        void administratorCancelsADraftOfAnotherOrganizer() {
+            Event draft = existing();
+
+            assertThat(service.cancelAsAdministrator(draft.getId(), administrator).getStatus())
+                    .isEqualTo(EventStatus.CANCELLED);
+        }
+
+        @Test
+        void unknownEventIsNotFound() {
+            UUID id = UUID.randomUUID();
+            when(repository.findById(id)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.cancelAsAdministrator(id, administrator))
+                    .isInstanceOf(EventNotFoundException.class);
         }
     }
 

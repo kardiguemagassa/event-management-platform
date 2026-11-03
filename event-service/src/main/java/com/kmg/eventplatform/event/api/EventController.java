@@ -6,6 +6,7 @@ import static com.kmg.eventplatform.event.infrastructure.openapi.OpenApiResponse
 import static com.kmg.eventplatform.event.infrastructure.openapi.OpenApiResponses.NOT_FOUND;
 
 import com.kmg.eventplatform.event.application.EventSearch;
+import com.kmg.eventplatform.event.application.EventSearch.Scope;
 import com.kmg.eventplatform.event.application.EventService;
 import com.kmg.eventplatform.event.domain.Event;
 import com.kmg.eventplatform.event.domain.EventStatus;
@@ -27,6 +28,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -52,6 +54,11 @@ public class EventController {
     /** Only accepted value of the organizer filter; the security configuration requires ORGANIZER for it. */
     static final String ORGANIZER_ME = "me";
 
+    /** Only accepted value of the scope filter; the security configuration requires ADMIN for it. */
+    static final String SCOPE_ALL = "all";
+
+    private static final String ADMIN_AUTHORITY = "ROLE_ADMIN";
+
     private static final int MAX_TEXT_LENGTH = 100;
     private static final int MAX_IDS = 100;
 
@@ -76,14 +83,19 @@ public class EventController {
         return ResponseEntity.created(location).body(EventResponse.from(event));
     }
 
-    @Operation(summary = "Get an event by id", description = "Public, except drafts: visible to their organizer only.")
+    @Operation(summary = "Get an event by id",
+            description = "Public, except drafts: visible to their organizer (and administrators) only.")
     @ApiResponse(responseCode = "200", description = "Event found")
     @ApiResponse(responseCode = "400", ref = BAD_REQUEST)
     @ApiResponse(responseCode = "404", ref = NOT_FOUND)
     @GetMapping("/{id}")
     public EventResponse get(@Parameter(description = "Event id") @PathVariable UUID id,
-                             @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
-        return EventResponse.from(service.getVisible(id, userIdOrNull(caller)));
+                             @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller,
+                             @Parameter(hidden = true) Authentication authentication) {
+        Event event = isAdministrator(authentication)
+                ? service.getById(id)
+                : service.getVisible(id, userIdOrNull(caller));
+        return EventResponse.from(event);
     }
 
     @Operation(summary = "List events",
@@ -91,8 +103,9 @@ public class EventController {
                     + "are optional and combined with AND. Sortable by: startAt (default, asc), createdAt, title.")
     @ApiResponse(responseCode = "200", description = "Page of events")
     @ApiResponse(responseCode = "400", ref = BAD_REQUEST)
-    @ApiResponse(responseCode = "401", description = "organizer=me without a token")
-    @ApiResponse(responseCode = "403", description = "organizer=me without the ORGANIZER role")
+    @ApiResponse(responseCode = "401", description = "organizer=me or scope=all without a token")
+    @ApiResponse(responseCode = "403", description = "organizer=me without the ORGANIZER role, or scope=all "
+            + "without the ADMIN role")
     @GetMapping
     public PageResponse<EventResponse> list(
             @Parameter(description = "Only events in this status") @RequestParam(required = false) EventStatus status,
@@ -105,6 +118,9 @@ public class EventController {
             @Parameter(description = "`me`: every event of the caller, drafts and cancelled ones included "
                     + "(ORGANIZER role)", schema = @Schema(allowableValues = ORGANIZER_ME))
             @RequestParam(required = false) String organizer,
+            @Parameter(description = "`all`: every event of every organizer, drafts included (ADMIN role); "
+                    + "not combined with organizer", schema = @Schema(allowableValues = SCOPE_ALL))
+            @RequestParam(required = false) String scope,
             @Parameter(description = "Only these events (batch read, max " + MAX_IDS + " ids, comma-separated); "
                     + "events the caller cannot see are left out")
             @RequestParam(required = false) List<UUID> ids,
@@ -113,7 +129,7 @@ public class EventController {
             @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
         validateSort(pageable.getSort());
         validateText(q);
-        EventSearch search = new EventSearch(status, q, from, mine(organizer), idSet(ids));
+        EventSearch search = new EventSearch(status, q, from, scope(organizer, scope), idSet(ids));
         return PageResponse.from(service.list(search, userIdOrNull(caller), pageable).map(EventResponse::from));
     }
 
@@ -143,14 +159,19 @@ public class EventController {
         return EventResponse.from(service.publish(id, userId(caller)));
     }
 
-    @Operation(summary = "Cancel an event", description = "DRAFT or PUBLISHED -> CANCELLED. Idempotent.")
+    @Operation(summary = "Cancel an event", description = "DRAFT or PUBLISHED -> CANCELLED. Idempotent. "
+            + "By its organizer, or by an administrator (moderation, audited).")
     @ApiResponse(responseCode = "200", description = "Event cancelled")
     @ApiResponse(responseCode = "403", ref = FORBIDDEN)
     @ApiResponse(responseCode = "404", ref = NOT_FOUND)
     @PostMapping("/{id}/cancel")
     public EventResponse cancel(@Parameter(description = "Event id") @PathVariable UUID id,
-                                @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
-        return EventResponse.from(service.cancel(id, userId(caller)));
+                                @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller,
+                                @Parameter(hidden = true) Authentication authentication) {
+        Event event = isAdministrator(authentication)
+                ? service.cancelAsAdministrator(id, userId(caller))
+                : service.cancel(id, userId(caller));
+        return EventResponse.from(event);
     }
 
     @Operation(summary = "Delete an event", description = "Only events without reservations; cancel it otherwise.")
@@ -175,14 +196,26 @@ public class EventController {
         return caller == null ? null : userId(caller);
     }
 
-    private static boolean mine(String organizer) {
-        if (organizer == null) {
-            return false;
-        }
-        if (!ORGANIZER_ME.equals(organizer)) {
+    private static boolean isAdministrator(Authentication authentication) {
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> ADMIN_AUTHORITY.equals(authority.getAuthority()));
+    }
+
+    /** The role each scope needs is checked by the security configuration, from the same parameters. */
+    private static Scope scope(String organizer, String scope) {
+        if (organizer != null && !ORGANIZER_ME.equals(organizer)) {
             throw new InvalidQueryParameterException("organizer", "Only 'me' is supported");
         }
-        return true;
+        if (scope != null && !SCOPE_ALL.equals(scope)) {
+            throw new InvalidQueryParameterException("scope", "Only 'all' is supported");
+        }
+        if (organizer != null && scope != null) {
+            throw new InvalidQueryParameterException("scope", "Not combined with organizer");
+        }
+        if (scope != null) {
+            return Scope.ALL;
+        }
+        return organizer != null ? Scope.MINE : Scope.VISIBLE;
     }
 
     private static Set<UUID> idSet(List<UUID> ids) {

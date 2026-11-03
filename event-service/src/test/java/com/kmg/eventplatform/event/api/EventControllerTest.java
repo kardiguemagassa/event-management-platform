@@ -259,7 +259,7 @@ class EventControllerTest {
         ArgumentCaptor<EventSearch> search = ArgumentCaptor.forClass(EventSearch.class);
         verify(service).list(search.capture(), eq(ORGANIZER), any());
         assertThat(search.getValue()).isEqualTo(new EventSearch(EventStatus.PUBLISHED, "Paris",
-                Instant.parse("2026-12-01T00:00:00Z"), true, Set.of(first, second)));
+                Instant.parse("2026-12-01T00:00:00Z"), EventSearch.Scope.MINE, Set.of(first, second)));
     }
 
     @Test
@@ -285,6 +285,82 @@ class EventControllerTest {
         anonymous.perform(get("/api/events").param("organizer", "me").with(caller(UUID.randomUUID(), "ATTENDEE")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void administratorListsEveryEvent() throws Exception {
+        UUID admin = UUID.randomUUID();
+        when(service.list(any(), eq(admin), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(event()), invocation.getArgument(2), 1));
+
+        anonymous.perform(get("/api/events").param("scope", "all").param("status", "DRAFT")
+                        .with(caller(admin, "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1));
+
+        verify(service).list(eq(new EventSearch(EventStatus.DRAFT, null, null, EventSearch.Scope.ALL, null)),
+                eq(admin), any());
+    }
+
+    @Test
+    void everyEventRequiresTheAdminRole() throws Exception {
+        mockMvc.perform(get("/api/events").param("scope", "all"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        anonymous.perform(get("/api/events").param("scope", "all"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void scopeRejectsOtherValuesAndTheOrganizerFilter() throws Exception {
+        UUID admin = UUID.randomUUID();
+
+        anonymous.perform(get("/api/events").param("scope", "everything").with(caller(admin, "ADMIN")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        anonymous.perform(get("/api/events").param("scope", "all").param("organizer", "me")
+                        .with(caller(admin, "ADMIN", "ORGANIZER")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void administratorReadsADraft() throws Exception {
+        Event draft = event();
+        when(service.getById(draft.getId())).thenReturn(draft);
+
+        anonymous.perform(get("/api/events/{id}", draft.getId()).with(caller(UUID.randomUUID(), "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DRAFT"));
+
+        verify(service, never()).getVisible(any(), any());
+    }
+
+    @Test
+    void administratorCancelsAnyEvent() throws Exception {
+        UUID admin = UUID.randomUUID();
+        Event event = event();
+        event.cancel();
+        when(service.cancelAsAdministrator(event.getId(), admin)).thenReturn(event);
+
+        anonymous.perform(post("/api/events/{id}/cancel", event.getId()).with(caller(admin, "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        verify(service, never()).cancel(any(), any());
+    }
+
+    @Test
+    void attendeeCannotCancelAnEvent() throws Exception {
+        anonymous.perform(post("/api/events/{id}/cancel", UUID.randomUUID())
+                        .with(caller(UUID.randomUUID(), "ATTENDEE")))
+                .andExpect(status().isForbidden());
 
         verifyNoInteractions(service);
     }

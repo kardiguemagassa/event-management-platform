@@ -33,7 +33,7 @@
           "Events"
         ],
         "summary": "Get an event by id",
-        "description": "Public, except drafts: visible to their organizer only.",
+        "description": "Public, except drafts: visible to their organizer (and administrators) only.",
         "operationId": "get",
         "parameters": [
           {
@@ -221,6 +221,18 @@
             }
           },
           {
+            "name": "scope",
+            "in": "query",
+            "description": "`all`: every event of every organizer, drafts included (ADMIN role); not combined with organizer",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          },
+          {
             "name": "ids",
             "in": "query",
             "description": "Only these events (batch read, max 100 ids, comma-separated); events the caller cannot see are left out",
@@ -286,7 +298,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "organizer=me without a token",
+            "description": "organizer=me or scope=all without a token",
             "content": {
               "application/json": {
                 "schema": {
@@ -296,7 +308,7 @@
             }
           },
           "403": {
-            "description": "organizer=me without the ORGANIZER role",
+            "description": "organizer=me without the ORGANIZER role, or scope=all without the ADMIN role",
             "content": {
               "application/json": {
                 "schema": {
@@ -514,7 +526,7 @@
           "Events"
         ],
         "summary": "Cancel an event",
-        "description": "DRAFT or PUBLISHED -> CANCELLED. Idempotent.",
+        "description": "DRAFT or PUBLISHED -> CANCELLED. Idempotent. By its organizer, or by an administrator (moderation, audited).",
         "operationId": "cancel",
         "parameters": [
           {

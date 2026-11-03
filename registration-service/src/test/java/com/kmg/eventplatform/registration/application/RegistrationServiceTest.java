@@ -274,6 +274,20 @@ class RegistrationServiceTest {
     }
 
     @Test
+    void administratorListsTheRegistrationsOfAnyEventWithTheAttendeeNames() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Registration registration = confirmedRegistration();
+        attendees.names.put(userId, "Ada Lovelace");
+        when(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CONFIRMED, pageable))
+                .thenReturn(new PageImpl<>(List.of(registration), pageable, 1));
+
+        Page<EventRegistration> page = service.findByEventAsAdministrator(
+                eventId, RegistrationStatus.CONFIRMED, UUID.randomUUID(), pageable);
+
+        assertThat(page.getContent()).containsExactly(new EventRegistration(registration, "Ada Lovelace"));
+    }
+
+    @Test
     void registrationsOfAnEventCreatedBeforeOwnershipAreListedByNobody() {
         events.organizers.remove(eventId);
 

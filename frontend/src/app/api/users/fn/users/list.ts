@@ -11,6 +11,16 @@ import { PageResponseUserResponse } from '../../models/page-response-user-respon
 
 export interface List$Params {
   /**
+   * Name or e-mail containing this text, case-insensitive (max 100 characters)
+   */
+  q?: string;
+
+  /**
+   * Only these users (max 100 ids, comma-separated)
+   */
+  ids?: Array<string>;
+
+  /**
    * Zero-based page index (0..N)
    */
   page?: number;
@@ -34,6 +44,8 @@ export function list(
 ): Observable<StrictHttpResponse<PageResponseUserResponse>> {
   const rb = new RequestBuilder(rootUrl, list.PATH, 'get');
   if (params) {
+    rb.query('q', params.q, {});
+    rb.query('ids', params.ids, {});
     rb.query('page', params.page, {});
     rb.query('size', params.size, {});
     rb.query('sort', params.sort, {});

@@ -36,6 +36,7 @@ class EventApiIT {
     private static final String ORGANIZER = TestTokens.forUser(ORGANIZER_ID, "ORGANIZER", "ATTENDEE");
     private static final String OTHER_ORGANIZER = TestTokens.forUser(UUID.randomUUID(), "ORGANIZER");
     private static final String ATTENDEE = TestTokens.forUser(UUID.randomUUID(), "ATTENDEE");
+    private static final String ADMIN = TestTokens.forUser(UUID.randomUUID(), "ADMIN");
     private static final String ANONYMOUS = null;
 
     @DynamicPropertySource
@@ -115,6 +116,23 @@ class EventApiIT {
         assertThat(cancel.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(cancel.getBody()).containsEntry("code", "NOT_EVENT_ORGANIZER");
         assertThat(send("GET", "/api/events/" + id, null, ANONYMOUS).getBody()).containsEntry("status", "PUBLISHED");
+    }
+
+    @Test
+    void administratorSeesEveryEventAndCancelsAnyOfThem() {
+        String draft = draft();
+        String published = draft();
+        send("POST", "/api/events/" + published + "/publish", null, ORGANIZER);
+
+        assertThat(ids(send("GET", "/api/events?scope=all&size=100", null, ADMIN))).contains(draft, published);
+        assertThat(send("GET", "/api/events/" + draft, null, ADMIN).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(send("GET", "/api/events?scope=all", null, ORGANIZER).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        assertThat(send("POST", "/api/events/" + published + "/cancel", null, ADMIN).getBody())
+                .containsEntry("status", "CANCELLED");
+        assertThat(send("PUT", "/api/events/" + draft, eventJson("Changed", 10), ADMIN).getStatusCode())
+                .as("moderation is cancelling, not editing").isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test

@@ -112,20 +112,22 @@ the Keycloak admin console.
 | `ORGANIZER` | by an administrator | creating events, and changing, publishing, cancelling or deleting one's own |
 | `SEAT_MANAGER` | the `registration-service` service account only | reserving and releasing seats |
 | `PROFILE_READER` | the `registration-service` service account only | reading the display names of users |
-| `ADMIN` | by an administrator | reading and deleting any user profile |
+| `ADMIN` | by an administrator | moderation: searching and deleting any user profile, listing every event (drafts included), reading who registered to any event, cancelling any event |
 
 | Route | Access |
 |---|---|
-| `GET /api/events`, `GET /api/events/{id}` | public; a draft is visible to its organizer only |
+| `GET /api/events`, `GET /api/events/{id}` | public; a draft is visible to its organizer (and `ADMIN`) only |
 | `GET /api/events?organizer=me` | `ORGANIZER`: every event of the caller, drafts and cancelled ones included |
-| other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`) |
+| `GET /api/events?scope=all` | `ADMIN`: every event of every organizer, drafts included |
+| `POST /api/events/{id}/cancel` | `ORGANIZER` of the event, or `ADMIN` (moderation, audited) |
+| other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`); an administrator cancels but never edits, publishes or deletes the event of another |
 | `/api/events/{id}/capacity/**` | `SEAT_MANAGER`; closed at the gateway |
 | `POST /api/registrations`, `POST /api/registrations/{id}/cancel` | `ATTENDEE`, own registrations only (others are `404`) |
 | `GET /api/registrations/me`, `GET /api/registrations/{id}` | authenticated, own registrations only |
-| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event; each registration carries the attendee's display name |
+| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event, or `ADMIN` (audited); each registration carries the attendee's display name |
 | `GET` `PUT` `DELETE /api/users/me` | authenticated, one's own profile |
 | `GET /api/users/names` | `PROFILE_READER`; closed at the gateway |
-| `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN` |
+| `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN`; the list searches by name or e-mail (`q`) and by ids; a deletion is audited |
 
 Clients, all issuing access tokens with the audience `event-platform-api`, checked by every service:
 
@@ -298,7 +300,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (50 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (56 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -311,6 +313,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (50 c
   attendee cancelling a registration (`404`);
 - business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation, an attendee finding
   their registration to an event; the event is cancelled at the end so that runs do not pile up in the catalogue;
+- administration: every event listed (`scope=all`, refused to an organizer), registrations of any event with the names,
+  a profile found by e-mail then erased, the event of an organizer cancelled (moderation);
 - resilience: `event-service` outage (fast `503` once the instance has left discovery, gateway fallback), recovery after restart,
   and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
@@ -430,7 +434,11 @@ pull request would change `main` directly and require merging `main` back into `
   registration, the seat stays reserved. A transactional outbox with a message broker would make the saga reliable.
 - **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
   behind TLS, a fixed hostname and an external database for high availability.
-- **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console.
+- **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console. Roles are not
+  managed from the application: it would take a service account allowed to manage the users of the realm, the most
+  sensitive privilege of the platform.
+- **Audit trail in the logs**: administrator actions (cancelling the event of another, reading its registrations,
+  deleting a profile) are logged with the administrator's id, in Loki with their trace; not yet a dedicated audit store.
 - **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
 - **`otel-lgtm` is a development backend**: one container, no persistence, default Grafana account. Production would
   run a collector and the backends separately (or send OTLP to a vendor).
@@ -449,7 +457,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API (in progress), users and events screens (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

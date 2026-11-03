@@ -46,8 +46,10 @@ public class UserController {
     /** Only these properties may be used for sorting (whitelist: predictable, index-backed queries). */
     private static final Set<String> SORTABLE_PROPERTIES = Set.of("createdAt", "fullName", "email");
 
-    /** Batch size of the names lookup: one page of registrations at most. */
+    /** Batch size of the names lookup (one page of registrations) and of the ids filter of the list. */
     private static final int MAX_IDS = 100;
+
+    private static final int MAX_TEXT_LENGTH = 100;
 
     private final UserService service;
 
@@ -117,28 +119,42 @@ public class UserController {
         return UserResponse.from(service.getById(id));
     }
 
-    @Operation(summary = "List users", description = "Requires the ADMIN role. "
-            + "Paginated (default size 20, max 100). Sortable by: createdAt (default, desc), fullName, email.")
+    @Operation(summary = "List users", description = "Requires the ADMIN role. Filters are optional and combined "
+            + "with AND. Paginated (default size 20, max 100). Sortable by: createdAt (default, desc), fullName, email.")
     @ApiResponse(responseCode = "200", description = "Page of users")
     @ApiResponse(responseCode = "400", ref = BAD_REQUEST)
     @GetMapping
     public PageResponse<UserResponse> list(
+            @Parameter(description = "Name or e-mail containing this text, case-insensitive (max "
+                    + MAX_TEXT_LENGTH + " characters)", example = "dupont")
+            @RequestParam(required = false) String q,
+            @Parameter(description = "Only these users (max " + MAX_IDS + " ids, comma-separated)")
+            @RequestParam(required = false) List<UUID> ids,
             @ParameterObject
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         validateSort(pageable.getSort());
-        return PageResponse.from(service.list(pageable).map(UserResponse::from));
+        if (q != null && q.strip().length() > MAX_TEXT_LENGTH) {
+            throw new InvalidQueryParameterException("q", "At most " + MAX_TEXT_LENGTH + " characters");
+        }
+        Set<UUID> distinct = ids == null ? Set.of() : new HashSet<>(ids);
+        if (distinct.size() > MAX_IDS) {
+            throw new InvalidQueryParameterException("ids", "At most " + MAX_IDS + " ids");
+        }
+        return PageResponse.from(service.list(q, distinct, pageable).map(UserResponse::from));
     }
 
-    @Operation(summary = "Delete a user's profile", description = "Requires the ADMIN role.")
+    @Operation(summary = "Delete a user's profile", description = "Requires the ADMIN role. Audited. The Keycloak "
+            + "account stays; registrations stay, without the name.")
     @ApiResponse(responseCode = "204", description = "User deleted")
     @ApiResponse(responseCode = "404", ref = NOT_FOUND)
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@Parameter(description = "User id") @PathVariable UUID id) {
-        service.delete(id);
+    public void delete(@Parameter(description = "User id") @PathVariable UUID id,
+                       @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
+        service.deleteAsAdministrator(id, userId(caller));
     }
 
-    /** Keycloak user id of the caller: the /me routes require a token. */
+    /** Keycloak user id of the caller: every route but the internal names lookup requires a user token. */
     private static UUID userId(Jwt caller) {
         return UUID.fromString(caller.getSubject());
     }
