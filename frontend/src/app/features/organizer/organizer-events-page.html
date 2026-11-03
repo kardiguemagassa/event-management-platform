@@ -92,6 +92,9 @@
                   Publier
                 </button>
               }
+              @if (event.status !== 'DRAFT') {
+                <a mat-button [routerLink]="[event.id, 'inscrits']">Inscrits</a>
+              }
               @if (event.status !== 'CANCELLED') {
                 <a mat-stroked-button [routerLink]="[event.id, 'modifier']">Modifier</a>
                 <button

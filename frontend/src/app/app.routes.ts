@@ -39,6 +39,13 @@ export const routes: Routes = [
       import('./features/organizer/event-form-page').then((m) => m.EventFormPage),
   },
   {
+    path: 'organisation/:id/inscrits',
+    title: 'Inscrits · Event Platform',
+    canActivate: [hasRole('ORGANIZER')],
+    loadComponent: () =>
+      import('./features/organizer/event-attendees-page').then((m) => m.EventAttendeesPage),
+  },
+  {
     path: 'organisation/:id/modifier',
     title: "Modifier l'événement · Event Platform",
     canActivate: [hasRole('ORGANIZER')],
