@@ -1,6 +1,10 @@
 {
   "realm": "event-platform",
   "displayName": "Event Management Platform",
+  "loginTheme": "event-platform",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["fr"],
+  "defaultLocale": "fr",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": true,
@@ -97,6 +101,7 @@
     {
       "clientId": "event-platform-bff",
       "name": "Event platform BFF (API gateway)",
+      "baseUrl": "http://localhost:4200/",
       "description": "Browser login through the gateway: confidential client, tokens kept server-side, session cookie only in the browser",
       "publicClient": false,
       "secret": "${BFF_CLIENT_SECRET}",

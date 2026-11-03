@@ -201,7 +201,12 @@ B=http://localhost:8080
 JAR=$(mktemp)
 bff() { curl -s -c "$JAR" -b "$JAR" "$@"; }
 LOGIN_PAGE=$(bff -o /dev/null -w '%{redirect_url}' "$B/oauth2/authorization/keycloak")
-LOGIN_ACTION=$(bff "$LOGIN_PAGE" | python3 -c '
+LOGIN_HTML=$(bff "$LOGIN_PAGE")
+# The realm's login theme (keycloak/themes): its stylesheet, and the French title of the page.
+[[ "$LOGIN_HTML" == *"/event-platform/css/event-platform.css"* && "$LOGIN_HTML" == *"Connexion"* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  login page served with the platform theme, in French"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  login page theme: ${LOGIN_HTML:0:300}"; }
+LOGIN_ACTION=$(printf '%s' "$LOGIN_HTML" | python3 -c '
 import html, re, sys
 form = re.search(r"<form[^>]*kc-form-login[^>]*>", sys.stdin.read())
 action = re.search(r"action=\"([^\"]+)\"", form.group(0)) if form else None
