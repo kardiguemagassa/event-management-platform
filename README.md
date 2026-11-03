@@ -388,7 +388,7 @@ Every merge to `main` and every `vX.Y.Z` tag publishes images for `linux/amd64` 
 Each image is scanned with Trivy (no fixable critical vulnerability) and carries an SBOM and build provenance.
 
 ```bash
-export IMAGE_NAMESPACE=kardigue IMAGE_TAG=0.3.0
+export IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0.0
 docker compose --profile app pull
 docker compose --profile app up -d --no-build
 ```
