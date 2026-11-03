@@ -1,0 +1,20 @@
+<form class="card" (submit)="$event.preventDefault(); save()" novalidate>
+  <h1>Bienvenue !</h1>
+  <p class="lead">Ton compte est créé. Indique le nom qui apparaîtra sur tes inscriptions.</p>
+
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Nom complet</mat-label>
+    <input matInput [formControl]="fullName" [maxlength]="maxLength" autocomplete="name" required />
+    <mat-hint>Pré-rempli depuis ton compte de connexion, modifiable.</mat-hint>
+    @if (fullNameError(fullName); as message) {
+      <mat-error>{{ message }}</mat-error>
+    }
+  </mat-form-field>
+
+  @if (failure(); as message) {
+    <p class="failure" role="alert">{{ message }}</p>
+  }
+
+  <button mat-flat-button type="submit" [disabled]="saving()">Continuer vers les événements</button>
+  <p class="privacy">Ton e-mail reste privé : les organisateurs ne voient que ton nom.</p>
+</form>

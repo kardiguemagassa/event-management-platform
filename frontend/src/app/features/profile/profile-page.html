@@ -1,0 +1,101 @@
+<header class="page-header">
+  <h1>Mon compte</h1>
+</header>
+
+@if (profile.isLoading() && !user()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Chargement de ton profil" />
+}
+
+@if (loadError(); as message) {
+  <div class="state" role="alert">
+    <p>{{ message }}</p>
+    <button mat-stroked-button type="button" (click)="profile.reload()">Réessayer</button>
+  </div>
+} @else if (user(); as u) {
+  <div class="feedback" aria-live="polite">
+    @if (notice(); as message) {
+      <p class="banner success" role="status">{{ message }}</p>
+    }
+    @if (failure(); as message) {
+      <p class="banner danger" role="alert">{{ message }}</p>
+    }
+  </div>
+
+  <section class="card" aria-labelledby="profile-title">
+    <h2 id="profile-title">Profil</h2>
+    <form (submit)="$event.preventDefault(); save()" novalidate>
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Nom complet</mat-label>
+        <input
+          matInput
+          [formControl]="fullName"
+          [maxlength]="maxLength"
+          autocomplete="name"
+          required
+        />
+        <mat-hint
+          >Le nom que voient les organisateurs des événements auxquels tu t'inscris.</mat-hint
+        >
+        @if (fullNameError(fullName); as message) {
+          <mat-error>{{ message }}</mat-error>
+        }
+      </mat-form-field>
+      <button mat-flat-button type="submit" [disabled]="busy() || fullName.pristine">
+        Enregistrer
+      </button>
+    </form>
+    <dl class="facts">
+      <div>
+        <dt>E-mail</dt>
+        <dd>{{ u.email }}</dd>
+      </div>
+      <div>
+        <dt>Membre depuis</dt>
+        <dd class="capitalized">{{ u.createdAt | date: 'MMMM y' }}</dd>
+      </div>
+    </dl>
+    <p class="hint">L'e-mail vient de ton compte de connexion : il se modifie depuis celui-ci.</p>
+  </section>
+
+  <section class="card" aria-labelledby="session-title">
+    <h2 id="session-title">Session</h2>
+    <button mat-stroked-button type="button" (click)="logout()" [disabled]="busy()">
+      Se déconnecter
+    </button>
+  </section>
+
+  <section class="card danger-zone" aria-labelledby="erase-title">
+    <h2 id="erase-title">Supprimer mon profil</h2>
+    <p>
+      Ton nom et ton e-mail sont effacés de la plateforme, puis tu es déconnecté. Tes inscriptions
+      restent, sans ton nom. Ton compte de connexion n'est pas supprimé : à ta prochaine connexion,
+      un nouveau profil te sera demandé.
+    </p>
+    @if (confirmingDelete()) {
+      <p class="confirm" id="erase-question">Supprimer définitivement ton profil ?</p>
+      <div class="confirm-buttons" role="group" aria-labelledby="erase-question">
+        <button
+          mat-flat-button
+          class="danger"
+          type="button"
+          (click)="deleteProfile()"
+          [disabled]="busy()"
+        >
+          Oui, supprimer
+        </button>
+        <button
+          mat-stroked-button
+          type="button"
+          (click)="confirmingDelete.set(false)"
+          [disabled]="busy()"
+        >
+          Annuler
+        </button>
+      </div>
+    } @else {
+      <button mat-stroked-button class="danger" type="button" (click)="confirmingDelete.set(true)">
+        Supprimer mon profil
+      </button>
+    }
+  </section>
+}

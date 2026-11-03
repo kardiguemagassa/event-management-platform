@@ -26,6 +26,10 @@
         <span class="account-name">{{ user.name ?? user.email ?? 'Mon compte' }}</span>
       </button>
       <mat-menu #accountMenu="matMenu" xPosition="before">
+        <a mat-menu-item routerLink="/profil">
+          <mat-icon svgIcon="account" aria-hidden="true" />
+          <span>Mon compte</span>
+        </a>
         <button mat-menu-item (click)="logout()" [disabled]="signingOut()">
           <mat-icon svgIcon="logout" aria-hidden="true" />
           <span>Se déconnecter</span>
@@ -57,10 +61,10 @@
     </a>
   }
   @if (session.authenticated()) {
-    <button type="button" (click)="logout()" [disabled]="signingOut()">
-      <mat-icon svgIcon="logout" aria-hidden="true" />
-      Déconnexion
-    </button>
+    <a routerLink="/profil" routerLinkActive="active" ariaCurrentWhenActive="page">
+      <mat-icon svgIcon="account" aria-hidden="true" />
+      Compte
+    </a>
   } @else {
     <button type="button" (click)="login()">
       <mat-icon svgIcon="account" aria-hidden="true" />

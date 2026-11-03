@@ -22,5 +22,17 @@ export const routes: Routes = [
         (m) => m.MyRegistrationsPage,
       ),
   },
+  {
+    path: 'profil',
+    title: 'Mon compte · Event Platform',
+    canActivate: [authenticated],
+    loadComponent: () => import('./features/profile/profile-page').then((m) => m.ProfilePage),
+  },
+  {
+    path: 'bienvenue',
+    title: 'Bienvenue · Event Platform',
+    canActivate: [authenticated],
+    loadComponent: () => import('./features/profile/onboarding-page').then((m) => m.OnboardingPage),
+  },
   { path: '**', redirectTo: '' },
 ];
