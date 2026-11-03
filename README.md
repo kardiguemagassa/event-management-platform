@@ -16,7 +16,7 @@ GitHub Actions.
 | `api-gateway` | Single entry point: token validation, routing, circuit breakers with fallback, one Swagger UI for every service |
 | `discovery-server` | Eureka registry: services find each other by name |
 | `user-service` | Application profiles of the users (`/api/users/me`), keyed by their Keycloak id |
-| `event-service` | Events, their lifecycle (draft, published, cancelled), their organizer and capacity, with idempotent seat reservation |
+| `event-service` | Events, their lifecycle (draft, published, cancelled), their organizer and capacity, with idempotent seat reservation (HTTP, or seat commands from Kafka answered through its outbox) |
 | `registration-service` | Registers the authenticated user to an event, reserving a seat in `event-service` with its own service account |
 | `keycloak` | Identity provider: sign-up and login, roles, access tokens (realm `event-platform`) |
 | `platform-security` | Shared library (not a service): resource server setup of the servlet services, test token helpers |

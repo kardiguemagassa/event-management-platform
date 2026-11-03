@@ -54,6 +54,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Seat commands over Kafka: outbox, idempotent consumption, dead letter topics -->
+        <dependency>
+            <groupId>com.kmg.eventplatform</groupId>
+            <artifactId>platform-messaging</artifactId>
+        </dependency>
         <!-- Distributed tracing (OpenTelemetry), shared setup -->
         <dependency>
             <groupId>com.kmg.eventplatform</groupId>
@@ -106,6 +111,23 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Kafka container shared by the services' tests -->
+        <dependency>
+            <groupId>com.kmg.eventplatform</groupId>
+            <artifactId>platform-messaging</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -32,7 +32,7 @@ import org.springframework.web.client.RestClient;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "eureka.client.enabled=false")
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, KafkaTestcontainersConfiguration.class})
 class CapacityConcurrencyIT {
 
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT =
