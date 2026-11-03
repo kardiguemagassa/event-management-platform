@@ -16,6 +16,7 @@ import { provideUsersApiConfiguration } from '../../api/users/users-api-configur
 import { Session } from '../../core/auth/session';
 import { problemInterceptor } from '../../core/http/problem.interceptor';
 import { FrenchPaginatorIntl } from '../../core/ui/french-paginator-intl';
+import { provideIcons } from '../../core/ui/icons';
 import { Confirmations } from '../../shared/confirm-dialog';
 import { AdminUsersPage } from './admin-users-page';
 
@@ -50,6 +51,7 @@ describe('AdminUsersPage', () => {
         provideHttpClient(withInterceptors([problemInterceptor])),
         provideHttpClientTesting(),
         provideUsersApiConfiguration(''),
+        provideIcons(),
         { provide: LOCALE_ID, useValue: 'fr-FR' },
         { provide: MatPaginatorIntl, useClass: FrenchPaginatorIntl },
         {
