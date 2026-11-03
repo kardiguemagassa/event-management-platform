@@ -332,6 +332,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (58 c
   intervals (development values; production keeps the defaults).
 - One private network per service and its database: a database is reachable by its owner only.
 - Health checks on `/actuator/health/readiness`, used to order the startup.
+- JVM sized for the container: G1 chosen explicitly (the JVM would pick the single-threaded Serial collector below
+  2 CPUs or 1792 MB, measured at 6 s pauses), heap at 60 % of the 512 MB limit.
 
 ### Running a published release
 

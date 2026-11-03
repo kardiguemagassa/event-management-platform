@@ -12,7 +12,7 @@ x-spring-service: &spring-service
   deploy:
     resources:
       limits:
-        # The JVM sizes its heap from this limit (MaxRAMPercentage=75 in the image).
+        # The JVM sizes its heap from this limit (MaxRAMPercentage=60 in the image, G1 collector).
         memory: 512M
 
 x-spring-environment: &spring-environment
