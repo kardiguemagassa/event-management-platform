@@ -140,6 +140,20 @@ public class RegistrationService {
         if (!organizer) {
             throw new NotEventOrganizerException(eventId);
         }
+        return registrationsOf(eventId, status, pageable);
+    }
+
+    /**
+     * Moderation: an administrator reads who registered to any event. Audited, since it discloses the names of
+     * attendees to someone other than the organizer.
+     */
+    public Page<EventRegistration> findByEventAsAdministrator(UUID eventId, RegistrationStatus status,
+                                                             UUID administratorId, Pageable pageable) {
+        log.info("Audit: administrator {} read the registrations of event {}", administratorId, eventId);
+        return registrationsOf(eventId, status, pageable);
+    }
+
+    private Page<EventRegistration> registrationsOf(UUID eventId, RegistrationStatus status, Pageable pageable) {
         Page<Registration> page = status == null
                 ? repository.findByEventId(eventId, pageable)
                 : repository.findByEventIdAndStatus(eventId, status, pageable);

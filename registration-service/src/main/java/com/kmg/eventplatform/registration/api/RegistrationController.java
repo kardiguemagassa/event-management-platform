@@ -14,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -100,8 +101,8 @@ class RegistrationController {
 
     @GetMapping("/events/{eventId}")
     @Operation(summary = "List the registrations of an event",
-            description = "Its organizer only. Each registration carries the attendee's display name (null when "
-                    + "unknown: no profile, or names temporarily unavailable).")
+            description = "Its organizer, or an administrator (audited). Each registration carries the attendee's "
+                    + "display name (null when unknown: no profile, or names temporarily unavailable).")
     @ApiResponse(responseCode = "200", description = "Page of registrations, newest first by default")
     @ApiResponse(responseCode = "400", ref = OpenApiResponses.BAD_REQUEST)
     @ApiResponse(responseCode = "403", ref = OpenApiResponses.FORBIDDEN)
@@ -112,9 +113,18 @@ class RegistrationController {
             @Parameter(description = "Only registrations in this status")
             @RequestParam(required = false) RegistrationStatus status,
             @ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
-            @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
-        return PageResponse.from(service.findByEvent(eventId, status, userId(caller), checkSort(pageable))
-                .map(EventRegistrationResponse::from));
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller,
+            @Parameter(hidden = true) Authentication authentication) {
+        Pageable checked = checkSort(pageable);
+        var registrations = isAdministrator(authentication)
+                ? service.findByEventAsAdministrator(eventId, status, userId(caller), checked)
+                : service.findByEvent(eventId, status, userId(caller), checked);
+        return PageResponse.from(registrations.map(EventRegistrationResponse::from));
+    }
+
+    private static boolean isAdministrator(Authentication authentication) {
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
     }
 
     /** Keycloak user id of the caller: every route of this controller requires a token. */

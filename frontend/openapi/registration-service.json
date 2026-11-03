@@ -251,7 +251,7 @@
           "Registrations"
         ],
         "summary": "List the registrations of an event",
-        "description": "Its organizer only. Each registration carries the attendee's display name (null when unknown: no profile, or names temporarily unavailable).",
+        "description": "Its organizer, or an administrator (audited). Each registration carries the attendee's display name (null when unknown: no profile, or names temporarily unavailable).",
         "operationId": "findByEvent",
         "parameters": [
           {

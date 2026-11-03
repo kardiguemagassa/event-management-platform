@@ -125,9 +125,32 @@
           "Users"
         ],
         "summary": "List users",
-        "description": "Requires the ADMIN role. Paginated (default size 20, max 100). Sortable by: createdAt (default, desc), fullName, email.",
+        "description": "Requires the ADMIN role. Filters are optional and combined with AND. Paginated (default size 20, max 100). Sortable by: createdAt (default, desc), fullName, email.",
         "operationId": "list",
         "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Name or e-mail containing this text, case-insensitive (max 100 characters)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "dupont"
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Only these users (max 100 ids, comma-separated)",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
           {
             "name": "page",
             "in": "query",
@@ -233,7 +256,7 @@
           "Users"
         ],
         "summary": "Delete a user's profile",
-        "description": "Requires the ADMIN role.",
+        "description": "Requires the ADMIN role. Audited. The Keycloak account stays; registrations stay, without the name.",
         "operationId": "delete",
         "parameters": [
           {

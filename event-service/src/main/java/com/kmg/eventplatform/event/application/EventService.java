@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -27,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional(readOnly = true)
 public class EventService {
+
+    private static final Logger log = LoggerFactory.getLogger(EventService.class);
 
     private final EventRepository repository;
     private final Clock clock;
@@ -59,17 +63,20 @@ public class EventService {
     }
 
     /**
-     * Events matching the search, among those visible to the viewer: every published or cancelled event, plus the
-     * viewer's own drafts. With {@link EventSearch#mine()}, every event of the viewer and only those.
+     * Events matching the search, within its {@link EventSearch.Scope scope}. The scope is authorized by the caller's
+     * role before this call: {@code MINE} for organizers, {@code ALL} for administrators.
      *
-     * @param viewerId the caller, {@code null} when anonymous (never with {@code mine})
+     * @param viewerId the caller, {@code null} when anonymous (never with {@code MINE})
      */
     public Page<Event> list(EventSearch search, UUID viewerId, Pageable pageable) {
         List<Specification<Event>> criteria = new ArrayList<>();
-        if (search.mine()) {
-            criteria.add(organizedBy(Objects.requireNonNull(viewerId, "mine requires an authenticated caller")));
-        } else {
-            criteria.add(visibleTo(viewerId));
+        switch (search.scope()) {
+            case VISIBLE -> criteria.add(visibleTo(viewerId));
+            case MINE -> criteria.add(
+                    organizedBy(Objects.requireNonNull(viewerId, "MINE requires an authenticated caller")));
+            case ALL -> {
+                // Every event: no criterion.
+            }
         }
         if (search.status() != null) {
             criteria.add(hasStatus(search.status()));
@@ -104,6 +111,21 @@ public class EventService {
     public Event cancel(UUID id, UUID organizerId) {
         Event event = getOwned(id, organizerId);
         event.cancel();
+        return event;
+    }
+
+    /**
+     * Moderation: an administrator cancels any event, whoever organizes it. Audited, since it acts on the work of
+     * another user.
+     */
+    @Transactional
+    public Event cancelAsAdministrator(UUID id, UUID administratorId) {
+        Event event = getById(id);
+        event.cancel();
+        if (!event.isOrganizedBy(administratorId)) {
+            log.info("Audit: administrator {} cancelled event {} of organizer {}",
+                    administratorId, id, event.getOrganizerId());
+        }
         return event;
     }
 

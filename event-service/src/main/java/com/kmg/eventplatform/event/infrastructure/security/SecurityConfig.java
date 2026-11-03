@@ -27,8 +27,12 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.FORWARD).permitAll()
                         // Seat reservation: service account of registration-service only.
                         .requestMatchers("/api/events/*/capacity/**").hasRole("SEAT_MANAGER")
+                        // Every event of every organizer, drafts included: administrators only.
+                        .requestMatchers(allEvents()).hasRole("ADMIN")
                         // "My events" of an organizer, drafts included: the role, not just a token.
                         .requestMatchers(organizerOwnEvents()).hasRole("ORGANIZER")
+                        // Cancelling: the organizer of the event, or an administrator (moderation).
+                        .requestMatchers(HttpMethod.POST, "/api/events/*/cancel").hasAnyRole("ORGANIZER", "ADMIN")
                         // The catalog is public; drafts are filtered by the application layer.
                         .requestMatchers(HttpMethod.GET, "/api/events", "/api/events/*").permitAll()
                         .requestMatchers("/api/events", "/api/events/**").hasRole("ORGANIZER")
@@ -43,7 +47,16 @@ public class SecurityConfig {
 
     /** {@code GET /api/events?organizer=...}: same path as the public catalog, told apart by its query parameter. */
     private static RequestMatcher organizerOwnEvents() {
+        return catalogWith("organizer");
+    }
+
+    /** {@code GET /api/events?scope=...}: same path as the public catalog, told apart by its query parameter. */
+    private static RequestMatcher allEvents() {
+        return catalogWith("scope");
+    }
+
+    private static RequestMatcher catalogWith(String parameter) {
         RequestMatcher catalog = PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/events");
-        return request -> catalog.matches(request) && request.getParameter("organizer") != null;
+        return request -> catalog.matches(request) && request.getParameter(parameter) != null;
     }
 }

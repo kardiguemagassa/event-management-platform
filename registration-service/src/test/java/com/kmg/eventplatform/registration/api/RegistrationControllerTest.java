@@ -39,9 +39,12 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -126,6 +129,20 @@ class RegistrationControllerTest {
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void administratorListsTheRegistrationsOfAnyEvent() throws Exception {
+        UUID admin = UUID.randomUUID();
+        when(service.findByEventAsAdministrator(eq(eventId), isNull(), eq(admin), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(new EventRegistration(registration, "Ada Lovelace")),
+                        PageRequest.of(0, 20), 1));
+
+        anonymous.perform(get("/api/registrations/events/{eventId}", eventId).with(caller(admin, "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].attendeeName").value("Ada Lovelace"));
+
+        verify(service, never()).findByEvent(any(), any(), any(), any());
     }
 
     @Test

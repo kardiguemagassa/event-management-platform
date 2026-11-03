@@ -31,6 +31,11 @@ export interface List$Params {
   organizer?: 'me';
 
   /**
+   * `all`: every event of every organizer, drafts included (ADMIN role); not combined with organizer
+   */
+  scope?: 'all';
+
+  /**
    * Only these events (batch read, max 100 ids, comma-separated); events the caller cannot see are left out
    */
   ids?: Array<string>;
@@ -63,6 +68,7 @@ export function list(
     rb.query('q', params.q, {});
     rb.query('from', params.from, {});
     rb.query('organizer', params.organizer, {});
+    rb.query('scope', params.scope, {});
     rb.query('ids', params.ids, {});
     rb.query('page', params.page, {});
     rb.query('size', params.size, {});

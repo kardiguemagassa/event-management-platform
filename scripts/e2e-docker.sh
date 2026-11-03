@@ -352,9 +352,26 @@ call GET "/api/registrations/events/$E?status=CONFIRMED"
   && { PASS=$((PASS+1)); echo "PASS  a deleted profile leaves the registration listed without a name"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  name of a deleted profile -> $CODE body=$BODY"; }
 
+# Moderation: an administrator sees every event, reads who registered, finds and erases a profile, cancels the event.
+echo "== Administration"
+ADMIN_TOKEN=$(kc_token event-platform "$E2E_CLIENT" "$E2E_ADMIN" "$E2E_PASSWORD")
+call GET "/api/events?scope=all&ids=$E"; check "only administrators list every event" 403 ACCESS_DENIED
+AUTH=$ADMIN_TOKEN call GET "/api/events?scope=all&ids=$E"
+[ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  administrator lists every event"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  every event -> $CODE body=$BODY"; }
+AUTH=$ADMIN_TOKEN call GET "/api/registrations/events/$E?status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(names)" = "Attendee 3,None" ] \
+  && { PASS=$((PASS+1)); echo "PASS  administrator reads the registrations of any event, with the names"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  registrations for the administrator -> $CODE body=$BODY"; }
+AUTH=$ADMIN_TOKEN call GET "/api/users?q=$(attendee 3)"   # e-mail of this run: unique
+A3=$(python3 -c 'import json,sys;c=json.loads(sys.argv[1])["content"];print(c[0]["id"] if len(c)==1 else "")' "$BODY" 2>/dev/null)
+[ "$CODE" = 200 ] && [ -n "$A3" ] && { PASS=$((PASS+1)); echo "PASS  administrator finds a profile by e-mail"; } \
+                                 || { FAIL=$((FAIL+1)); echo "FAIL  profile search -> $CODE body=$BODY"; }
+AUTH=$ADMIN_TOKEN call DELETE "/api/users/$A3"; check "administrator erases the profile" 204
+
 # Each run leaves its event cancelled: it no longer shows in the catalogue of published events.
 echo "== Cleanup"
-call POST "/api/events/$E/cancel"
+AUTH=$ADMIN_TOKEN call POST "/api/events/$E/cancel"; check "administrator cancels the event of an organizer" 200
 AUTH=none call GET "/api/events?status=PUBLISHED&ids=$E"
 [ "$CODE" = 200 ] && [ "$(count)" = 0 ] && { PASS=$((PASS+1)); echo "PASS  cancelled event left the catalogue"; } \
                                        || { FAIL=$((FAIL+1)); echo "FAIL  cancelled event still listed -> $CODE body=$BODY"; }

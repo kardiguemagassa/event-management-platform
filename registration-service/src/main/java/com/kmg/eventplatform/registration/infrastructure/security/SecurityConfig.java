@@ -28,7 +28,9 @@ public class SecurityConfig {
                         // API docs, aggregated by the gateway's Swagger UI; the local Swagger UI when run alone.
                         .requestMatchers(HttpMethod.GET, "/v3/api-docs", "/v3/api-docs/**",
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/registrations/events/*").hasRole("ORGANIZER")
+                        // Who registered to an event: its organizer, or an administrator (moderation).
+                        .requestMatchers(HttpMethod.GET, "/api/registrations/events/*")
+                        .hasAnyRole("ORGANIZER", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/registrations", "/api/registrations/*/cancel")
                         .hasRole("ATTENDEE")
                         .requestMatchers(HttpMethod.GET, "/api/registrations/me", "/api/registrations/*")
