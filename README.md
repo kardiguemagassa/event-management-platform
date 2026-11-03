@@ -314,6 +314,32 @@ The public client only supports the browser login flow (Authorization Code with 
 the end-to-end script shows the whole recipe: it creates a test client with the password grant and test users
 through the Keycloak admin API, then deletes them on exit. Such a client must never exist outside development.
 
+### Browser tests (Playwright)
+
+`e2e/` drives the web application in Chromium, as its users do, on the platform started with Docker (option 1):
+
+- identities: an attendee, an organizer and an administrator created through the Keycloak admin API (credentials from
+  `.env`), each signing in once through the real login page (Backend for Frontend session, saved and reused), and an
+  address for the sign-up test; all deleted at the end, with their profiles and the events of the run;
+- visitor: catalogue and search, event page, sign-in to register and back to the event, the way back from the login
+  page;
+- sign-up on the Keycloak page (French error for a too short password), then the welcome page;
+- one event across the roles: created, published and edited by the organizer, an attendee registers (seats left go
+  down), the organizer sees the attendee's name, an administrator cancels it and the attendee sees it cancelled, then
+  finds the attendee's profile;
+- accessibility: axe-core with the WCAG 2.1 A and AA rules on the main page of each role and on the login page; a
+  serious or critical violation fails the test;
+- phone layout (Pixel 7): the bottom bar instead of the top navigation.
+
+```bash
+cd e2e && npm ci && npx playwright install chromium
+npx playwright test              # against http://localhost:4200 and http://localhost:8180
+npx playwright test --ui         # step by step, with the DOM and the network of each step
+```
+
+On a failure, the trace (each step with its DOM, network and console) and a screenshot are kept; in CI they are
+uploaded with the HTML report.
+
 ### End-to-end smoke test
 
 ```bash
@@ -407,6 +433,7 @@ After a change of the API, with the platform running:
 | Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs |
 | Web application | Vitest, Angular TestBed, `HttpTestingController` | Session (BFF), error mapping, guards, pages and components against a fake HTTP backend; coverage floor 85 % lines, 80 % branches (`npm test` in `frontend`) |
 | End to end | `scripts/e2e-docker.sh` | The whole platform in Docker with a real Keycloak, through the gateway only, including an outage and the recovery of `event-service` |
+| Browser | Playwright, axe-core | The user journeys in Chromium on the platform in Docker, signing in on the real Keycloak pages; WCAG 2.1 A/AA checks on the main pages; a phone layout (`e2e`, see below) |
 
 `./mvnw verify` runs the unit and integration tests (Docker is required for Testcontainers) and the coverage checks.
 JaCoCo measures unit and integration tests together; each module has a floor just below its measured coverage, so
@@ -425,7 +452,7 @@ coverage can only go up:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | Pull request to `dev` or `main`, push to `dev` | `build`: `./mvnw verify`, coverage table on the run page, reports as artifacts. `frontend`: generated API client up to date, lint, format, unit tests, production build. `e2e`: the whole platform in Docker, the end-to-end scenario, and the OpenAPI documents of the front-end checked against the running services |
+| `ci.yml` | Pull request to `dev` or `main`, push to `dev` | `build`: `./mvnw verify`, coverage table on the run page, reports as artifacts. `frontend`: generated API client up to date, lint, format, unit tests, production build. `e2e`: the whole platform in Docker, the end-to-end scenario, the browser tests (Playwright report and traces uploaded on failure), and the OpenAPI documents of the front-end checked against the running services |
 | `release.yml` | Push to `main`, tag `vX.Y.Z` | Tests again, then for each image: build, Trivy scan (fails on any fixable critical vulnerability), build for `linux/amd64` and `linux/arm64`, push to Docker Hub with SBOM and provenance |
 | Dependabot | Weekly | Pull requests against `dev` for Maven dependencies, GitHub Actions and Docker base images |
 
@@ -483,7 +510,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end tests (Playwright, axe-core) (done) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |
