@@ -52,7 +52,7 @@ describe('Session', () => {
     expect(session.user()).toEqual(ADA);
     expect(session.authenticated()).toBe(true);
     expect(session.organizer()).toBe(true);
-    expect(session.hasRole('ADMIN')).toBe(false);
+    expect(session.administrator()).toBe(false);
   });
 
   it('is anonymous on 401, and on any other failure of the probe', async () => {

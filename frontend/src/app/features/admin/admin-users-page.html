@@ -1,0 +1,97 @@
+<app-admin-tabs>
+  <form class="search" role="search" (submit)="$event.preventDefault(); find()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Nom ou e-mail</mat-label>
+      <mat-icon matPrefix svgIcon="search" aria-hidden="true" />
+      <input matInput type="search" [formControl]="search" [maxlength]="searchMax" />
+    </mat-form-field>
+    <button mat-flat-button type="submit">Rechercher</button>
+    @if (searched()) {
+      <button mat-button type="button" (click)="clear()">Effacer</button>
+    }
+  </form>
+
+  @if (users.isLoading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Chargement des profils" />
+  }
+
+  <div class="feedback" aria-live="polite">
+    @if (notice(); as message) {
+      <p class="banner success" role="status">{{ message }}</p>
+    }
+    @if (failure(); as message) {
+      <p class="banner danger" role="alert">{{ message }}</p>
+    }
+  </div>
+
+  @if (loadError(); as message) {
+    <div class="state" role="alert">
+      <p>{{ message }}</p>
+      <button mat-stroked-button type="button" (click)="users.reload()">Réessayer</button>
+    </div>
+  } @else if (result(); as page) {
+    @if (page.content?.length) {
+      <p class="count">{{ page.totalElements }} profil{{ page.totalElements === 1 ? '' : 's' }}</p>
+      <table class="users">
+        <caption class="visually-hidden">
+          Profils des utilisateurs
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Nom</th>
+            <th scope="col">E-mail</th>
+            <th scope="col">Inscrit le</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (user of page.content; track user.id) {
+            <tr>
+              <td class="name">
+                {{ user.fullName }}
+                @if (isMe(user)) {
+                  <span class="badge">Toi</span>
+                }
+              </td>
+              <td class="email">{{ user.email }}</td>
+              <td>
+                <time [attr.datetime]="user.createdAt">{{ user.createdAt | date: 'dd/MM/y' }}</time>
+              </td>
+              <td class="actions">
+                @if (!isMe(user)) {
+                  <button
+                    mat-button
+                    class="danger"
+                    type="button"
+                    (click)="remove(user)"
+                    [disabled]="busy() === user.id"
+                  >
+                    Supprimer
+                  </button>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      @if ((page.totalPages ?? 0) > 1) {
+        <mat-paginator
+          [length]="page.totalElements"
+          [pageIndex]="page.page"
+          [pageSize]="pageSize"
+          [hidePageSize]="true"
+          (page)="changePage($event)"
+          aria-label="Pages des profils"
+        />
+      }
+    } @else {
+      <div class="state">
+        @if (searched(); as q) {
+          <p>Aucun profil ne correspond à « {{ q }} ».</p>
+        } @else {
+          <p>Aucun profil pour l'instant.</p>
+        }
+      </div>
+    }
+  }
+</app-admin-tabs>

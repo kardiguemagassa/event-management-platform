@@ -31,6 +31,19 @@ export const routes: Routes = [
       import('./features/organizer/organizer-events-page').then((m) => m.OrganizerEventsPage),
   },
   {
+    path: 'administration',
+    canActivate: [hasRole('ADMIN')],
+    children: [
+      { path: '', pathMatch: 'full', redirectTo: 'utilisateurs' },
+      {
+        path: 'utilisateurs',
+        title: 'Utilisateurs · Administration · Event Platform',
+        loadComponent: () =>
+          import('./features/admin/admin-users-page').then((m) => m.AdminUsersPage),
+      },
+    ],
+  },
+  {
     path: 'organisation/nouveau',
     title: 'Nouvel événement · Event Platform',
     canActivate: [hasRole('ORGANIZER')],

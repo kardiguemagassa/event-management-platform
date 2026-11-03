@@ -36,13 +36,16 @@ export class Shell {
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
 
-  /** "Organiser" for organizers only (the page itself is guarded by the role). */
+  /** "Organiser" for organizers, "Administration" for administrators (the pages are guarded by the roles). */
   protected readonly navItems = computed<NavItem[]>(() => [
     { label: 'Catalogue', icon: 'calendar', link: '/' },
     // Signed-in only: an anonymous visitor goes through the login first (guard), then lands here.
     { label: 'Inscriptions', icon: 'registrations', link: '/mes-inscriptions' },
     ...(this.session.organizer()
       ? [{ label: 'Organiser', icon: 'organize', link: '/organisation' }]
+      : []),
+    ...(this.session.administrator()
+      ? [{ label: 'Administration', icon: 'admin', link: '/administration' }]
       : []),
   ]);
   protected readonly signingOut = signal(false);
