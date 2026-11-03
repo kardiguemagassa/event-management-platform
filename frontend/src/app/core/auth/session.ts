@@ -81,6 +81,16 @@ export class BrowserLocation {
     window.location.assign(url);
   }
 
+  /** Path and query of the current address. */
+  current(): string {
+    return window.location.pathname + window.location.search;
+  }
+
+  /** Changes the address without loading it (before the router reads it). */
+  replace(url: string): void {
+    history.replaceState(history.state, '', url);
+  }
+
   store(key: string, value: string): void {
     try {
       sessionStorage.setItem(key, value);

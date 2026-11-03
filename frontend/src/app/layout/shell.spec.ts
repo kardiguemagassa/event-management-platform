@@ -51,13 +51,22 @@ describe('Shell', () => {
     expect(session.login).toHaveBeenCalledWith('/?q=paris');
   });
 
-  it('shows the signed-in user, who can sign out from the bottom bar', () => {
+  /** Opens the account menu (desktop) and returns its items. */
+  function openAccountMenu(view: HTMLElement): HTMLElement[] {
+    (view.querySelector('.account-button') as HTMLButtonElement).click();
+    return [...document.querySelectorAll<HTMLElement>('.mat-mdc-menu-item')];
+  }
+
+  it('shows the signed-in user, who reaches the account page and signs out from the menu', () => {
     user.set({ subject: 'ada', name: 'Ada Lovelace', email: 'ada@example.com', roles: [] });
     session.logout.mockResolvedValue(undefined);
     const view = render();
 
     expect(view.querySelector('.account-name')?.textContent).toBe('Ada Lovelace');
-    (view.querySelector('.bottom-nav button') as HTMLButtonElement).click();
+    expect(view.querySelector('.bottom-nav a[href="/profil"]')?.textContent?.trim()).toBe('Compte');
+    const [account, signOut] = openAccountMenu(view);
+    expect(account.getAttribute('href')).toBe('/profil');
+    signOut.click();
 
     expect(session.logout).toHaveBeenCalledOnce();
   });
@@ -68,11 +77,16 @@ describe('Shell', () => {
     const view = render();
     expect(view.querySelector('.account-name')?.textContent).toBe('ada@example.com');
 
-    (view.querySelector('.bottom-nav button') as HTMLButtonElement).click();
+    openAccountMenu(view)[1].click();
     await new Promise((resolve) => setTimeout(resolve));
 
     expect(document.querySelector('.mat-mdc-snack-bar-label')?.textContent).toContain(
       'Indisponible',
     );
+  });
+
+  it('offers to sign in from the bottom bar to an anonymous visitor', () => {
+    const view = render();
+    expect(view.querySelector('.bottom-nav button')?.textContent?.trim()).toBe('Connexion');
   });
 });

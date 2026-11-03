@@ -104,6 +104,14 @@ describe('Session', () => {
 });
 
 describe('BrowserLocation', () => {
+  it('reads and replaces the address without loading it', () => {
+    const location = new BrowserLocation();
+    const before = location.current();
+    location.replace('/mes-inscriptions?periode=passees');
+    expect(location.current()).toBe('/mes-inscriptions?periode=passees');
+    location.replace(before);
+  });
+
   it('stores a value for one read', () => {
     const location = new BrowserLocation();
     location.store('key', 'value');
