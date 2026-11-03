@@ -1,0 +1,142 @@
+<app-admin-tabs>
+  <div class="toolbar">
+    <form class="search" role="search" (submit)="$event.preventDefault(); find()">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Titre ou lieu</mat-label>
+        <mat-icon matPrefix svgIcon="search" aria-hidden="true" />
+        <input matInput type="search" [formControl]="search" [maxlength]="searchMax" />
+      </mat-form-field>
+      <button mat-flat-button type="submit">Rechercher</button>
+      @if (searched()) {
+        <button mat-button type="button" (click)="clear()">Effacer</button>
+      }
+    </form>
+    <mat-button-toggle-group
+      class="filters"
+      aria-label="Statut"
+      [value]="filter()"
+      (change)="chooseFilter($event)"
+      hideSingleSelectionIndicator
+    >
+      <mat-button-toggle value="tous">Tous</mat-button-toggle>
+      <mat-button-toggle value="brouillons">Brouillons</mat-button-toggle>
+      <mat-button-toggle value="publies">Publiés</mat-button-toggle>
+      <mat-button-toggle value="annules">Annulés</mat-button-toggle>
+    </mat-button-toggle-group>
+  </div>
+
+  @if (events.isLoading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Chargement des événements" />
+  }
+
+  <div class="feedback" aria-live="polite">
+    @if (notice(); as message) {
+      <p class="banner success" role="status">{{ message }}</p>
+    }
+    @if (failure(); as message) {
+      <p class="banner danger" role="alert">{{ message }}</p>
+    }
+  </div>
+
+  @if (loadError(); as message) {
+    <div class="state" role="alert">
+      <p>{{ message }}</p>
+      <button mat-stroked-button type="button" (click)="events.reload()">Réessayer</button>
+    </div>
+  } @else if (result(); as page) {
+    @if (page.content?.length) {
+      <p class="count">
+        {{ page.totalElements }} événement{{ page.totalElements === 1 ? '' : 's' }}
+      </p>
+      <table class="events">
+        <caption class="visually-hidden">
+          Événements de la plateforme
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Événement</th>
+            <th scope="col">Organisateur</th>
+            <th scope="col">Date</th>
+            <th scope="col">Statut</th>
+            <th scope="col">Remplissage</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (event of page.content; track event.id) {
+            <tr>
+              <td class="title">
+                <strong>{{ event.title }}</strong>
+                <span>{{ event.location }}</span>
+              </td>
+              <td class="organizer">
+                @if (organizerName(event); as name) {
+                  {{ name }}
+                } @else {
+                  <span class="unknown">Nom indisponible</span>
+                }
+              </td>
+              <td class="date">
+                <time [attr.datetime]="event.startAt">{{
+                  event.startAt | date: 'dd/MM/y · HH:mm'
+                }}</time>
+              </td>
+              <td>
+                <span class="badge" [class]="event.status">{{ statusLabel(event) }}</span>
+              </td>
+              <td class="fill">
+                <span
+                  class="gauge"
+                  role="meter"
+                  aria-label="Places réservées"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  [attr.aria-valuenow]="booked(event)"
+                >
+                  <span [style.width.%]="booked(event)"></span>
+                </span>
+                <span class="seats">{{ event.reservedSeats }} / {{ event.capacity }} places</span>
+              </td>
+              <td class="actions">
+                @if (event.status !== 'DRAFT') {
+                  <a mat-button [routerLink]="[event.id, 'inscrits']">Inscrits</a>
+                }
+                @if (event.status !== 'CANCELLED') {
+                  <button
+                    mat-stroked-button
+                    class="danger"
+                    type="button"
+                    (click)="cancel(event)"
+                    [disabled]="busy() === event.id"
+                  >
+                    Annuler
+                  </button>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      @if ((page.totalPages ?? 0) > 1) {
+        <mat-paginator
+          [length]="page.totalElements"
+          [pageIndex]="page.page"
+          [pageSize]="pageSize"
+          [hidePageSize]="true"
+          (page)="changePage($event)"
+          aria-label="Pages des événements"
+        />
+      }
+    } @else {
+      <div class="state">
+        @if (searched(); as q) {
+          <p>Aucun événement ne correspond à « {{ q }} ».</p>
+        } @else if (filter() !== 'tous') {
+          <p>Aucun événement dans ce statut.</p>
+        } @else {
+          <p>Aucun événement pour l'instant.</p>
+        }
+      </div>
+    }
+  }
+</app-admin-tabs>

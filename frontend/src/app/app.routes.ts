@@ -34,7 +34,20 @@ export const routes: Routes = [
     path: 'administration',
     canActivate: [hasRole('ADMIN')],
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'utilisateurs' },
+      { path: '', pathMatch: 'full', redirectTo: 'evenements' },
+      {
+        path: 'evenements',
+        title: 'Événements · Administration · Event Platform',
+        loadComponent: () =>
+          import('./features/admin/admin-events-page').then((m) => m.AdminEventsPage),
+      },
+      {
+        path: 'evenements/:id/inscrits',
+        title: 'Inscrits · Administration · Event Platform',
+        data: { backLink: '/administration/evenements', backLabel: 'Administration' },
+        loadComponent: () =>
+          import('./features/organizer/event-attendees-page').then((m) => m.EventAttendeesPage),
+      },
       {
         path: 'utilisateurs',
         title: 'Utilisateurs · Administration · Event Platform',
