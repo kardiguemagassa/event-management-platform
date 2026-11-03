@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authenticated, hasRole } from './core/auth/guards';
+import { confirmLeave } from './shared/leave-guard';
 
 export const routes: Routes = [
   {
@@ -28,6 +29,22 @@ export const routes: Routes = [
     canActivate: [hasRole('ORGANIZER')],
     loadComponent: () =>
       import('./features/organizer/organizer-events-page').then((m) => m.OrganizerEventsPage),
+  },
+  {
+    path: 'organisation/nouveau',
+    title: 'Nouvel événement · Event Platform',
+    canActivate: [hasRole('ORGANIZER')],
+    canDeactivate: [confirmLeave],
+    loadComponent: () =>
+      import('./features/organizer/event-form-page').then((m) => m.EventFormPage),
+  },
+  {
+    path: 'organisation/:id/modifier',
+    title: "Modifier l'événement · Event Platform",
+    canActivate: [hasRole('ORGANIZER')],
+    canDeactivate: [confirmLeave],
+    loadComponent: () =>
+      import('./features/organizer/event-form-page').then((m) => m.EventFormPage),
   },
   {
     path: 'profil',

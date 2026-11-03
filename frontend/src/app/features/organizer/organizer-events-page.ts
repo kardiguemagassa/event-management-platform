@@ -13,7 +13,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleChange, MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { EventsApi } from '../../api/events/events-api';
 import { cancel } from '../../api/events/fn/events/cancel';
@@ -55,6 +55,7 @@ const STATUS_LABELS: Record<NonNullable<EventResponse['status']>, string> = {
     MatButtonToggleModule,
     MatPaginatorModule,
     MatProgressBarModule,
+    RouterLink,
   ],
   templateUrl: './organizer-events-page.html',
   styleUrl: './organizer-events-page.scss',
@@ -91,7 +92,10 @@ export class OrganizerEventsPage {
   protected readonly result = computed(() => valueOf(this.events));
 
   protected readonly busy = signal<string | null>(null);
-  protected readonly notice = signal<string | null>(null);
+  /** A message left by the page that sent here (the event form, after saving). */
+  protected readonly notice = signal<string | null>(
+    noticeIn(this.router.currentNavigation()?.extras.state),
+  );
   protected readonly failure = signal<string | null>(null);
 
   protected readonly loadError = computed(() => {
@@ -177,4 +181,9 @@ export class OrganizerEventsPage {
       this.events.reload();
     }
   }
+}
+
+function noticeIn(state: unknown): string | null {
+  const notice = (state as { notice?: unknown } | null)?.notice;
+  return typeof notice === 'string' ? notice : null;
 }

@@ -75,7 +75,9 @@ describe('OrganizerEventsPage', () => {
       (tr) => tr.querySelector('strong')?.textContent === title,
     )!;
   const actions = (title: string) =>
-    [...row(title).querySelectorAll('.actions button')].map((button) => button.textContent?.trim());
+    [...row(title).querySelectorAll('.actions button, .actions a')].map((action) =>
+      action.textContent?.trim(),
+    );
   const click = (title: string, label: string) =>
     (
       [...row(title).querySelectorAll('.actions button')].find(
@@ -128,9 +130,31 @@ describe('OrganizerEventsPage', () => {
     expect(row('Spring Boot Day').querySelector('time')?.textContent?.trim()).toBe(
       '21/01/2099 · 14:00',
     );
-    expect(actions('Atelier observabilité')).toEqual(['Publier', 'Annuler', 'Supprimer']);
-    expect(actions('Spring Boot Day')).toEqual(['Annuler']);
+    expect(actions('Atelier observabilité')).toEqual([
+      'Publier',
+      'Modifier',
+      'Annuler',
+      'Supprimer',
+    ]);
+    expect(actions('Spring Boot Day')).toEqual(['Modifier', 'Annuler']);
+    expect(row('Spring Boot Day').querySelector('.actions a')?.getAttribute('href')).toBe(
+      '/organisation/p1/modifier',
+    );
+    expect(view().querySelector('.page-header a')?.getAttribute('href')).toBe(
+      '/organisation/nouveau',
+    );
     expect(actions('Afterwork')).toEqual(['Supprimer']);
+  });
+
+  it('shows the message left by the event form', async () => {
+    await TestBed.inject(Router).navigate(['/organisation'], {
+      state: { notice: '« Meetup » est enregistré.' },
+    });
+    await elapse();
+    expectList().flush({ content: [DRAFT], totalElements: 1, totalPages: 1 });
+    await elapse();
+
+    expect(text('[role="status"]')).toBe('« Meetup » est enregistré.');
   });
 
   it('filters by status through the address', async () => {
@@ -224,6 +248,7 @@ describe('OrganizerEventsPage', () => {
   it('invites to create when there is nothing, and explains a failure', async () => {
     await open('/organisation', []);
     expect(text('.state p')).toBe("Tu n'as encore créé aucun événement.");
+    expect(view().querySelector('.state a')?.getAttribute('href')).toBe('/organisation/nouveau');
 
     (view().querySelectorAll('mat-button-toggle button')[3] as HTMLButtonElement).click();
     await elapse();

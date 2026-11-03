@@ -1,0 +1,106 @@
+<a class="back" routerLink="/organisation">‹ Mes événements</a>
+
+<header class="page-header">
+  <h1>{{ editing() ? "Modifier l'événement" : 'Nouvel événement' }}</h1>
+  @if (!editing()) {
+    <p class="subtitle">Il est créé en brouillon : tu le publieras depuis Mes événements.</p>
+  } @else if (event()?.status === 'PUBLISHED') {
+    <p class="subtitle">
+      Cet événement est publié : les modifications sont visibles tout de suite dans le catalogue.
+    </p>
+  }
+</header>
+
+@if (loaded.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Chargement de l'événement" />
+}
+
+@if (loadError(); as message) {
+  <div class="state" role="alert">
+    <p>{{ message }}</p>
+    <button mat-stroked-button type="button" (click)="loaded.reload()">Réessayer</button>
+  </div>
+} @else if (event()?.status === 'CANCELLED') {
+  <div class="state" role="status">
+    <p>Cet événement est annulé : il ne peut plus être modifié.</p>
+    <a mat-stroked-button routerLink="/organisation">Retour à mes événements</a>
+  </div>
+} @else if (!editing() || event()) {
+  <div class="feedback" aria-live="polite">
+    @if (failure(); as message) {
+      <p class="banner danger" role="alert">{{ message }}</p>
+    }
+  </div>
+
+  <form class="card" [formGroup]="form" (submit)="$event.preventDefault(); save()" novalidate>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Titre</mat-label>
+      <input matInput formControlName="title" [maxlength]="limits.title" required />
+      @if (fieldError(form.controls.title); as message) {
+        <mat-error>{{ message }}</mat-error>
+      }
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Lieu</mat-label>
+      <input matInput formControlName="location" [maxlength]="limits.location" required />
+      <mat-hint>Ville et salle, par exemple « Paris, Station F ».</mat-hint>
+      @if (fieldError(form.controls.location); as message) {
+        <mat-error>{{ message }}</mat-error>
+      }
+    </mat-form-field>
+
+    <div class="pair">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Début</mat-label>
+        <input matInput type="datetime-local" formControlName="startAt" [min]="earliest" required />
+        @if (fieldError(form.controls.startAt); as message) {
+          <mat-error>{{ message }}</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Capacité</mat-label>
+        <input
+          matInput
+          type="number"
+          inputmode="numeric"
+          formControlName="capacity"
+          [min]="reserved() || 1"
+          [max]="limits.capacity"
+          required
+        />
+        <span matTextSuffix>places</span>
+        @if (reserved()) {
+          <mat-hint>{{ reserved() }} déjà réservées.</mat-hint>
+        }
+        @if (fieldError(form.controls.capacity, reserved()); as message) {
+          <mat-error>{{ message }}</mat-error>
+        }
+      </mat-form-field>
+    </div>
+
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Description</mat-label>
+      <textarea
+        matInput
+        formControlName="description"
+        rows="6"
+        [maxlength]="limits.description"
+      ></textarea>
+      <mat-hint align="end"
+        >{{ form.controls.description.value.length }} / {{ limits.description }}</mat-hint
+      >
+      @if (fieldError(form.controls.description); as message) {
+        <mat-error>{{ message }}</mat-error>
+      }
+    </mat-form-field>
+
+    <div class="buttons">
+      <button mat-flat-button type="submit" [disabled]="busy() || (editing() && form.pristine)">
+        {{ editing() ? 'Enregistrer' : 'Créer le brouillon' }}
+      </button>
+      <a mat-button routerLink="/organisation">Annuler</a>
+    </div>
+  </form>
+}
