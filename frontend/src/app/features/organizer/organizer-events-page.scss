@@ -56,13 +56,13 @@
 }
 
 .title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   strong {
+    display: block;
     font-size: 15px;
   }
   span {
+    display: block;
+    margin-top: 2px;
     font-size: 13px;
     color: #475569;
   }
@@ -206,7 +206,6 @@ mat-paginator {
       border: 0;
     }
     td.title {
-      display: flex;
       padding-bottom: 8px;
     }
   }

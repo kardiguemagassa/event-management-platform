@@ -61,6 +61,16 @@ export class EventAttendeesPage {
 
   /** Route and query parameters, bound by the router. */
   readonly id = input.required<string>();
+  /**
+   * Route data: where "back" leads, the administration for instance. The router binds an absent value as
+   * undefined (not the input's default): the organizer's events are the fallback.
+   */
+  readonly backLink = input<string>();
+  readonly backLabel = input<string>();
+  protected readonly back = computed(() => ({
+    link: this.backLink() ?? '/organisation',
+    label: this.backLabel() ?? 'Mes événements',
+  }));
   readonly statut = input<string | undefined>();
   readonly page = input(0, {
     transform: (value: unknown) => Math.max(numberAttribute(value, 0), 0),

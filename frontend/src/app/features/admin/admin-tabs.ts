@@ -3,7 +3,10 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 
 /** The sections of the administration, as tabs that are links (each section has its own address). */
-const SECTIONS = [{ label: 'Utilisateurs', link: '/administration/utilisateurs' }];
+const SECTIONS = [
+  { label: 'Événements', link: '/administration/evenements' },
+  { label: 'Utilisateurs', link: '/administration/utilisateurs' },
+];
 
 @Component({
   selector: 'app-admin-tabs',

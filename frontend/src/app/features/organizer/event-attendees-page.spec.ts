@@ -53,7 +53,14 @@ describe('EventAttendeesPage', () => {
     TestBed.configureTestingModule({
       providers: [
         provideRouter(
-          [{ path: 'organisation/:id/inscrits', component: EventAttendeesPage }],
+          [
+            { path: 'organisation/:id/inscrits', component: EventAttendeesPage },
+            {
+              path: 'administration/evenements/:id/inscrits',
+              component: EventAttendeesPage,
+              data: { backLink: '/administration/evenements', backLabel: 'Administration' },
+            },
+          ],
           withComponentInputBinding(),
         ),
         provideHttpClient(withInterceptors([problemInterceptor])),
@@ -142,6 +149,16 @@ describe('EventAttendeesPage', () => {
     await elapse();
     expect(TestBed.inject(Router).url).toBe('/organisation/p1/inscrits');
     expectAttendees().flush({ content: [AWA], totalElements: 21, totalPages: 2 });
+  });
+
+  it('leads back to where it was opened from', async () => {
+    await open('/organisation/p1/inscrits', [AWA]);
+    expect(view().querySelector('.back')?.getAttribute('href')).toBe('/organisation');
+    expect(text('.back')).toBe('‹ Mes événements');
+
+    await open('/administration/evenements/p1/inscrits', [AWA]);
+    expect(view().querySelector('.back')?.getAttribute('href')).toBe('/administration/evenements');
+    expect(text('.back')).toBe('‹ Administration');
   });
 
   it('says when nobody is registered', async () => {
