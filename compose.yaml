@@ -241,13 +241,14 @@ services:
   event-service:
     <<: *spring-service
     image: ${IMAGE_NAMESPACE:-local}/event-platform-event-service:${IMAGE_TAG:-dev}
-    networks: [default, event-net]
+    networks: [default, event-net, messaging-net]
     build:
       context: .
       args:
         MODULE: event-service
     environment:
       <<: *spring-environment
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       EVENT_DB_HOST: event-db
       EVENT_DB_PORT: 5432
       EVENT_DB_NAME: ${EVENT_DB_NAME:-event_db}
@@ -255,6 +256,8 @@ services:
       EVENT_DB_PASSWORD: ${EVENT_DB_PASSWORD:?EVENT_DB_PASSWORD is required}
     depends_on:
       event-db:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
       discovery-server:
         condition: service_healthy

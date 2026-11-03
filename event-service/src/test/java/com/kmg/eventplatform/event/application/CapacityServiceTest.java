@@ -94,8 +94,10 @@ class CapacityServiceTest {
             when(capacity.insertReservation(RESERVATION, event.getId(), NOW)).thenReturn(1);
 
             assertThatThrownBy(() -> service.reserve(event.getId(), RESERVATION))
-                    .isInstanceOf(EventNotRegistrableException.class);
+                    .isInstanceOf(EventNotRegistrableException.class)
+                    .hasMessageContaining("status DRAFT");
             verify(capacity, never()).incrementReservedSeats(any(), any());
+            verify(capacity).deleteReservation(RESERVATION, event.getId());
         }
 
         @Test
@@ -106,6 +108,7 @@ class CapacityServiceTest {
 
             assertThatThrownBy(() -> service.reserve(event.getId(), RESERVATION))
                     .isInstanceOf(EventFullException.class);
+            verify(capacity).deleteReservation(RESERVATION, event.getId());
         }
 
         @Test
@@ -148,6 +151,58 @@ class CapacityServiceTest {
 
             assertThatThrownBy(() -> service.release(eventId, RESERVATION))
                     .isInstanceOf(EventNotFoundException.class);
+        }
+    }
+
+    /**
+     * The messaging path: refusals are answers, and leave nothing behind.
+     */
+    @Nested
+    class Attempt {
+
+        @Test
+        void aRefusalIsAnAnswerWithItsCode() {
+            Event full = existingEvent(true);
+            when(capacity.insertReservation(RESERVATION, full.getId(), NOW)).thenReturn(1);
+            when(capacity.incrementReservedSeats(full.getId(), NOW)).thenReturn(0);
+
+            ReservationAttempt attempt = service.attemptReservation(full.getId(), RESERVATION);
+
+            assertThat(attempt).isEqualTo(ReservationAttempt.EVENT_FULL);
+            assertThat(attempt.isReserved()).isFalse();
+            assertThat(attempt.rejectionCode()).isEqualTo("EVENT_FULL");
+            verify(capacity).deleteReservation(RESERVATION, full.getId());
+        }
+
+        @Test
+        void anUnknownEventIsAnAnswerToo() {
+            UUID eventId = UUID.randomUUID();
+            when(events.findById(eventId)).thenReturn(Optional.empty());
+
+            assertThat(service.attemptReservation(eventId, RESERVATION)).isEqualTo(ReservationAttempt.EVENT_NOT_FOUND);
+            verify(capacity, never()).insertReservation(any(), any(), any());
+        }
+
+        @Test
+        void aReservationOrItsReplayIsReserved() {
+            Event event = existingEvent(true);
+            when(capacity.insertReservation(RESERVATION, event.getId(), NOW)).thenReturn(1, 0);
+            when(capacity.incrementReservedSeats(event.getId(), NOW)).thenReturn(1);
+            when(capacity.findReservedEventId(RESERVATION)).thenReturn(Optional.of(event.getId()));
+
+            assertThat(service.attemptReservation(event.getId(), RESERVATION).isReserved()).isTrue();
+            ReservationAttempt replay = service.attemptReservation(event.getId(), RESERVATION);
+            assertThat(replay).isEqualTo(ReservationAttempt.ALREADY_RESERVED);
+            assertThat(replay.rejectionCode()).isNull();
+        }
+
+        @Test
+        void releasingWithoutAReservationIsANoOpWhateverTheEvent() {
+            UUID eventId = UUID.randomUUID();
+            when(capacity.deleteReservation(RESERVATION, eventId)).thenReturn(0);
+
+            assertThat(service.releaseIfReserved(eventId, RESERVATION)).isEqualTo(CapacityOutcome.NOT_RESERVED);
+            verify(events, never()).existsById(any());
         }
     }
 }

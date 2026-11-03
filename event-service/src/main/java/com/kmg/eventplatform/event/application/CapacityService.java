@@ -8,13 +8,14 @@ import com.kmg.eventplatform.event.domain.EventRepository;
 import com.kmg.eventplatform.event.domain.ReservationConflictException;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Seat reservation used by registration-service. Both operations are idempotent per
- * reservation id, so callers can safely retry them after a timeout.
+ * Seat reservation for registration-service, over HTTP (exceptions mapped to problems) or messaging (refusals as
+ * results). Both operations are idempotent per reservation id, so callers can safely retry them.
  */
 @Service
 @Transactional
@@ -30,28 +31,58 @@ public class CapacityService {
         this.clock = clock;
     }
 
+    /**
+     * HTTP path: a refusal is an exception, mapped to its problem.
+     */
     public CapacityOutcome reserve(UUID eventId, UUID reservationId) {
-        Instant now = clock.instant();
-        Event event = events.findById(eventId).orElseThrow(() -> new EventNotFoundException(eventId));
+        return switch (attemptReservation(eventId, reservationId)) {
+            case RESERVED -> CapacityOutcome.RESERVED;
+            case ALREADY_RESERVED -> CapacityOutcome.ALREADY_RESERVED;
+            case EVENT_NOT_FOUND -> throw new EventNotFoundException(eventId);
+            case EVENT_NOT_REGISTRABLE -> throw new EventNotRegistrableException(eventId,
+                    events.findById(eventId).map(Event::getStatus).orElse(null));
+            case EVENT_FULL -> throw new EventFullException(eventId);
+        };
+    }
 
+    /**
+     * Messaging path: a refusal is an answer, and nothing is left behind (no reservation row, no seat taken).
+     *
+     * @throws ReservationConflictException if the reservation id is already used for another event
+     */
+    public ReservationAttempt attemptReservation(UUID eventId, UUID reservationId) {
+        Instant now = clock.instant();
+        Optional<Event> event = events.findById(eventId);
+        if (event.isEmpty()) {
+            return ReservationAttempt.EVENT_NOT_FOUND;
+        }
         // Replay first: a retried reservation gets the same answer, even if the event changed since
         if (capacity.insertReservation(reservationId, eventId, now) == 0) {
             return replayOf(eventId, reservationId);
         }
-        if (!event.isRegistrable(now)) {
-            throw new EventNotRegistrableException(eventId, event.getStatus());
+        if (!event.get().isRegistrable(now)) {
+            capacity.deleteReservation(reservationId, eventId);
+            return ReservationAttempt.EVENT_NOT_REGISTRABLE;
         }
-        // Throwing rolls back the transaction, including the reservation row inserted above
         if (capacity.incrementReservedSeats(eventId, now) == 0) {
-            throw new EventFullException(eventId);
+            capacity.deleteReservation(reservationId, eventId);
+            return ReservationAttempt.EVENT_FULL;
         }
-        return CapacityOutcome.RESERVED;
+        return ReservationAttempt.RESERVED;
     }
 
     public CapacityOutcome release(UUID eventId, UUID reservationId) {
         if (!events.existsById(eventId)) {
             throw new EventNotFoundException(eventId);
         }
+        return releaseIfReserved(eventId, reservationId);
+    }
+
+    /**
+     * Messaging path: an unknown event has no reservation to release, so this is a no-op too (an event with
+     * reservations cannot be deleted).
+     */
+    public CapacityOutcome releaseIfReserved(UUID eventId, UUID reservationId) {
         if (capacity.deleteReservation(reservationId, eventId) == 0) {
             return CapacityOutcome.NOT_RESERVED;
         }
@@ -59,12 +90,12 @@ public class CapacityService {
         return CapacityOutcome.RELEASED;
     }
 
-    private CapacityOutcome replayOf(UUID eventId, UUID reservationId) {
+    private ReservationAttempt replayOf(UUID eventId, UUID reservationId) {
         UUID reservedEventId = capacity.findReservedEventId(reservationId)
                 .orElseThrow(() -> new IllegalStateException("Reservation " + reservationId + " disappeared"));
         if (!reservedEventId.equals(eventId)) {
             throw new ReservationConflictException(eventId, reservationId);
         }
-        return CapacityOutcome.ALREADY_RESERVED;
+        return ReservationAttempt.ALREADY_RESERVED;
     }
 }
