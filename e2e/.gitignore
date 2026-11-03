@@ -1,0 +1,5 @@
+node_modules/
+test-results/
+playwright-report/
+# Run state and signed-in sessions of the test identities: never committed.
+.auth/
