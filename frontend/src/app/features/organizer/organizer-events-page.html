@@ -1,6 +1,9 @@
 <header class="page-header">
-  <h1>Mes événements</h1>
-  <p class="subtitle">Les brouillons ne sont visibles que par toi jusqu'à leur publication.</p>
+  <div>
+    <h1>Mes événements</h1>
+    <p class="subtitle">Les brouillons ne sont visibles que par toi jusqu'à leur publication.</p>
+  </div>
+  <a mat-flat-button routerLink="nouveau">Nouvel événement</a>
 </header>
 
 <mat-button-toggle-group
@@ -90,6 +93,7 @@
                 </button>
               }
               @if (event.status !== 'CANCELLED') {
+                <a mat-stroked-button [routerLink]="[event.id, 'modifier']">Modifier</a>
                 <button
                   mat-stroked-button
                   class="danger"
@@ -130,6 +134,7 @@
     <div class="state">
       @if (filter() === 'tous') {
         <p>Tu n'as encore créé aucun événement.</p>
+        <a mat-stroked-button routerLink="nouveau">Créer mon premier événement</a>
       } @else {
         <p>Aucun événement dans ce statut.</p>
       }

@@ -1,11 +1,8 @@
-import { AbstractControl, FormControl, ValidationErrors, Validators } from '@angular/forms';
+import { FormControl, Validators } from '@angular/forms';
+import { notBlank } from './validators';
 
 /** Same rules as user-service (@NotBlank @Size(max = 100)): checked here first, for an immediate message. */
 export const FULL_NAME_MAX = 100;
-
-function notBlank(control: AbstractControl<string>): ValidationErrors | null {
-  return control.value.trim() ? null : { blank: true };
-}
 
 export function fullNameControl(initial: string): FormControl<string> {
   return new FormControl(initial, {
