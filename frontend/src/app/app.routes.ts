@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authenticated } from './core/auth/guards';
+import { authenticated, hasRole } from './core/auth/guards';
 
 export const routes: Routes = [
   {
@@ -21,6 +21,13 @@ export const routes: Routes = [
       import('./features/my-registrations/my-registrations-page').then(
         (m) => m.MyRegistrationsPage,
       ),
+  },
+  {
+    path: 'organisation',
+    title: 'Mes événements · Event Platform',
+    canActivate: [hasRole('ORGANIZER')],
+    loadComponent: () =>
+      import('./features/organizer/organizer-events-page').then((m) => m.OrganizerEventsPage),
   },
   {
     path: 'profil',

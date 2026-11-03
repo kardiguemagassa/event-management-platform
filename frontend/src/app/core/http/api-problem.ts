@@ -13,14 +13,24 @@ export class ApiProblem extends Error {
   }
 
   static from(response: HttpErrorResponse): ApiProblem {
-    const body: unknown = response.error;
-    const problem =
-      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    const problem = problemBody(response.error);
     const code =
       typeof problem['code'] === 'string' ? problem['code'] : fallbackCode(response.status);
     const errors = isStringRecord(problem['errors']) ? problem['errors'] : {};
     return new ApiProblem(response.status, code, messageOf(code), errors);
   }
+}
+
+/** The problem as an object, also when the call expected text and received the JSON unparsed. */
+function problemBody(body: unknown): Record<string, unknown> {
+  if (typeof body === 'string') {
+    try {
+      return problemBody(JSON.parse(body));
+    } catch {
+      return {};
+    }
+  }
+  return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
 }
 
 /** Messages for the users of the application: what happened and, when there is one, what to do. */

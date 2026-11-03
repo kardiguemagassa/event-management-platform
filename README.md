@@ -359,8 +359,9 @@ Sans served from the application itself, never from a font CDN).
 | CSRF | `HttpClient` sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header on writes: the names Spring Security uses by default |
 | Same origin | nginx in Docker, the dev-server proxy (`proxy.conf.json`) in development; the `Host` header is kept so that the gateway builds the OAuth2 redirect URI on `localhost:4200` |
 | API client | Generated from `frontend/openapi/*.json` with `ng-openapi-gen`, committed. CI fails if the client is not regenerated, and the e2e job fails if a service no longer serves the committed document |
-| Errors | One interceptor turns every failure into an `ApiProblem`: the stable `code` of the RFC 9457 problem and a message in French |
+| Errors | One interceptor turns every failure into an `ApiProblem`: the stable `code` of the RFC 9457 problem and a message in French, also for calls generated with a text response (`DELETE`), which receive the problem as unparsed JSON |
 | Profile | A signed-in user without an application profile (first sign-in, or profile deleted) is welcomed first (`/bienvenue`, name pre-filled from the sign-in account), then sent back to the page asked; `/profil` changes the name, signs out, and erases the profile (right to erasure) |
+| Organizer space | `/organisation`, for the `ORGANIZER` role only: the organizer's own events, drafts included, filtered by status in the address (`?statut=brouillons`); publish a draft, cancel and delete after a confirmation dialog, delete offered only while nobody is registered |
 | Security headers | Content Security Policy without inline script (`'self'` only), `nosniff`, no framing, strict referrer policy |
 | Accessibility | Skip link, landmarks, visible focus, live region for results, French labels for screen readers (paginator, gauges) |
 
@@ -448,7 +449,7 @@ pull request would change `main` directly and require merging `main` back into `
 
 | Version | Content |
 |---|---|
-| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer screens (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete (done), event form and attendee list (in progress) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it; browser end-to-end test (Playwright) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

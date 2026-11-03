@@ -11,6 +11,7 @@ describe('Shell', () => {
   const session = {
     user,
     authenticated: () => user() !== null,
+    organizer: () => user()?.roles.includes('ORGANIZER') ?? false,
     login: vi.fn(),
     logout: vi.fn(),
   };
@@ -39,6 +40,13 @@ describe('Shell', () => {
       ['Catalogue', '/'],
       ['Inscriptions', '/mes-inscriptions'],
     ]);
+  });
+
+  it('adds the organizer space for organizers only', () => {
+    user.set({ subject: 'k', name: 'K', email: null, roles: ['ATTENDEE', 'ORGANIZER'] });
+    const view = render();
+    const links = [...view.querySelectorAll('.top-nav a')].map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/', '/mes-inscriptions', '/organisation']);
   });
 
   it('offers to sign in, back to the current page', async () => {

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
@@ -36,11 +36,15 @@ export class Shell {
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
 
-  protected readonly navItems: NavItem[] = [
+  /** "Organiser" for organizers only (the page itself is guarded by the role). */
+  protected readonly navItems = computed<NavItem[]>(() => [
     { label: 'Catalogue', icon: 'calendar', link: '/' },
     // Signed-in only: an anonymous visitor goes through the login first (guard), then lands here.
     { label: 'Inscriptions', icon: 'registrations', link: '/mes-inscriptions' },
-  ];
+    ...(this.session.organizer()
+      ? [{ label: 'Organiser', icon: 'organize', link: '/organisation' }]
+      : []),
+  ]);
   protected readonly signingOut = signal(false);
 
   protected login(): void {
