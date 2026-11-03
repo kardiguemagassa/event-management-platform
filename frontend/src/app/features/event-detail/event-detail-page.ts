@@ -15,6 +15,7 @@ import { RegistrationResponse } from '../../api/registrations/models/registratio
 import { RegistrationsApi } from '../../api/registrations/registrations-api';
 import { Session } from '../../core/auth/session';
 import { ApiProblem, messageOf } from '../../core/http/api-problem';
+import { valueOf } from '../../shared/resources';
 import { availability, seatsLeftLabel } from '../../shared/seats';
 
 /** What the visitor can do with this event, in order of precedence. */
@@ -45,7 +46,10 @@ export class EventDetailPage {
     stream: ({ params }) => this.eventsApi.invoke(get, params),
   });
 
-  /** The visitor's active registration to this event; not asked for anonymous visitors. */
+  /**
+   * The visitor's active registration to this event; not asked for anonymous visitors. If this check fails, the
+   * page still offers to register: the API refuses a duplicate (ALREADY_REGISTERED), which reloads the check.
+   */
   protected readonly registration = rxResource({
     params: () => (this.session.authenticated() ? { eventId: this.id() } : undefined),
     stream: ({ params }) =>
@@ -60,13 +64,13 @@ export class EventDetailPage {
   protected readonly failure = signal<string | null>(null);
 
   protected readonly seats = computed(() => {
-    const event = this.event.value();
+    const event = valueOf(this.event);
     return event ? availability(event.capacity ?? 0, event.reservedSeats ?? 0) : null;
   });
   protected readonly seatsLabel = computed(() => seatsLeftLabel(this.seats()?.left ?? 0));
 
   protected readonly stage = computed<Stage | null>(() => {
-    const event = this.event.value();
+    const event = valueOf(this.event);
     if (!event) {
       return null;
     }
@@ -79,7 +83,7 @@ export class EventDetailPage {
     if (event.startAt && new Date(event.startAt) < new Date()) {
       return 'past';
     }
-    if (this.registration.value()) {
+    if (valueOf(this.registration)) {
       return 'registered';
     }
     return this.seats()?.tone === 'full' ? 'full' : 'open';
@@ -111,7 +115,7 @@ export class EventDetailPage {
   }
 
   protected async cancelRegistration(): Promise<void> {
-    const registration = this.registration.value();
+    const registration = valueOf(this.registration);
     if (!registration?.id) {
       return;
     }
