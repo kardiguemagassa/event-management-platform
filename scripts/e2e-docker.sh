@@ -244,7 +244,7 @@ check "internal names route closed at the edge" 403 ACCESS_DENIED
 AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_OTHER" "$E2E_PASSWORD") call GET "/api/registrations/events/$E"
 check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
 register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
-AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; echo "      cancel attendee 1 -> $CODE"
+AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; check "attendee 1 cancels their registration" 200
 register 3; check "register attendee 3 on freed seat" 201
 AUTH=$(attendee_token 3) call GET "/api/registrations/me?eventId=$E&status=CONFIRMED"
 [ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  attendee finds their registration to the event"; } \
@@ -252,7 +252,7 @@ AUTH=$(attendee_token 3) call GET "/api/registrations/me?eventId=$E&status=CONFI
 # Started in a known trace: its log line is looked up in Loki below.
 LOG_TRACE_ID=$(openssl rand -hex 16)
 TRACEPARENT="00-$LOG_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
-echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test), trace $LOG_TRACE_ID"
+check "attendee 2 cancels their registration (1 seat left for the outage test, trace $LOG_TRACE_ID)" 200
 
 # Before the outage: these checks are about the content of traces, on a stable platform.
 # One request through gateway, registration-service and event-service (organizer lookup with the service

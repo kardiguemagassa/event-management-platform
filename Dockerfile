@@ -58,6 +58,12 @@ COPY --from=build /workspace/extracted/snapshot-dependencies/ ./
 COPY --from=build /workspace/extracted/application/ ./
 
 USER app
-# Size the heap from the container memory limit, and restart cleanly rather than limp on after an OOM.
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+# - G1, chosen explicitly: below 2 CPUs or 1792 MB the JVM picks the Serial collector on its own, single-threaded and
+#   stop-the-world for every collection. Measured on the platform: young pauses of 1.7 s and a full collection of 6 s
+#   (triggered by the code cache), longer than the gateway timeout. G1 runs young pauses in parallel and answers the
+#   code cache threshold with a concurrent cycle; pause target 200 ms.
+# - Heap sized from the container memory limit: 60 %, the rest for metaspace, code cache, threads and G1's own
+#   structures (heap in use: about 70 MB for a 512 MB container).
+# - Restart cleanly rather than limp on after an OutOfMemoryError.
+ENV JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError"
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
