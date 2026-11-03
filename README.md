@@ -300,7 +300,7 @@ through the Keycloak admin API, then deletes them on exit. Such a client must ne
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (56 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (58 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
