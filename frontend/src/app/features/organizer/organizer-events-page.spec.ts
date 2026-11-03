@@ -136,14 +136,14 @@ describe('OrganizerEventsPage', () => {
       'Annuler',
       'Supprimer',
     ]);
-    expect(actions('Spring Boot Day')).toEqual(['Modifier', 'Annuler']);
-    expect(row('Spring Boot Day').querySelector('.actions a')?.getAttribute('href')).toBe(
-      '/organisation/p1/modifier',
-    );
+    expect(actions('Spring Boot Day')).toEqual(['Inscrits', 'Modifier', 'Annuler']);
+    expect(
+      [...row('Spring Boot Day').querySelectorAll('.actions a')].map((a) => a.getAttribute('href')),
+    ).toEqual(['/organisation/p1/inscrits', '/organisation/p1/modifier']);
     expect(view().querySelector('.page-header a')?.getAttribute('href')).toBe(
       '/organisation/nouveau',
     );
-    expect(actions('Afterwork')).toEqual(['Supprimer']);
+    expect(actions('Afterwork')).toEqual(['Inscrits', 'Supprimer']);
   });
 
   it('shows the message left by the event form', async () => {

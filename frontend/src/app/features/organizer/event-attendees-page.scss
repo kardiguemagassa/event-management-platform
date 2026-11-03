@@ -1,0 +1,168 @@
+:host {
+  display: block;
+  max-width: 880px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: #4338ca;
+  font-weight: 500;
+  text-decoration: none;
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+}
+
+.page-header {
+  margin-bottom: 20px;
+  h1 {
+    margin: 0;
+    font-size: 30px;
+  }
+  .subtitle {
+    margin: 6px 0 0;
+    color: #475569;
+    strong {
+      color: #0f172a;
+    }
+  }
+}
+
+.filters {
+  margin-bottom: 16px;
+  --mat-button-toggle-selected-state-background-color: #eef2ff;
+  --mat-button-toggle-selected-state-text-color: var(--mat-sys-primary);
+}
+
+.count {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.attendees {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #e4e7ee;
+  border-radius: 16px;
+  overflow: hidden;
+  th {
+    padding: 12px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    background: #f8fafc;
+    border-bottom: 1px solid #e4e7ee;
+  }
+  td {
+    padding: 14px 16px;
+    vertical-align: middle;
+    color: #334155;
+    border-bottom: 1px solid #eef0f5;
+  }
+  tr:last-child td {
+    border-bottom: 0;
+  }
+}
+
+.name {
+  font-weight: 600;
+  color: #0f172a !important;
+}
+
+.unknown {
+  font-weight: 400;
+  font-style: italic;
+  color: #64748b;
+}
+
+time {
+  white-space: nowrap;
+}
+
+.badge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  &.CONFIRMED {
+    background: #ecfdf5;
+    color: #047857;
+  }
+  &.CANCELLED {
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+}
+
+.when {
+  margin-left: 2px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+mat-paginator {
+  margin-top: 12px;
+  background: transparent;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  text-align: center;
+  color: #475569;
+  background: #fff;
+  border: 1px dashed #cbd2de;
+  border-radius: 16px;
+  p {
+    margin: 0;
+    font-size: 16px;
+  }
+}
+
+// Phones: one line per registration, name above, date and status below.
+@media (max-width: 640px) {
+  .page-header h1 {
+    font-size: 26px;
+  }
+  .attendees {
+    thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    tbody,
+    tr {
+      display: block;
+    }
+    tr {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #eef0f5;
+    }
+    tr:last-child {
+      border-bottom: 0;
+    }
+    td {
+      padding: 0;
+      border: 0;
+    }
+    td.name {
+      grid-column: 1 / -1;
+    }
+  }
+}
