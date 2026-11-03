@@ -7,7 +7,7 @@
   </a>
 
   <nav class="top-nav" aria-label="Navigation principale">
-    @for (item of navItems; track item.link) {
+    @for (item of navItems(); track item.link) {
       <a
         mat-button
         [routerLink]="item.link"
@@ -49,7 +49,7 @@
 </main>
 
 <nav class="bottom-nav" aria-label="Navigation principale (mobile)">
-  @for (item of navItems; track item.link) {
+  @for (item of navItems(); track item.link) {
     <a
       [routerLink]="item.link"
       routerLinkActive="active"

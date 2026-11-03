@@ -1,0 +1,218 @@
+.page-header {
+  margin-bottom: 20px;
+  h1 {
+    margin: 0;
+    font-size: 30px;
+  }
+  .subtitle {
+    margin: 6px 0 0;
+    color: #475569;
+  }
+}
+
+.filters {
+  margin-bottom: 16px;
+  --mat-button-toggle-selected-state-background-color: #eef2ff;
+  --mat-button-toggle-selected-state-text-color: var(--mat-sys-primary);
+}
+
+.count {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.events {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #e4e7ee;
+  border-radius: 16px;
+  overflow: hidden;
+  th {
+    padding: 12px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    background: #f8fafc;
+    border-bottom: 1px solid #e4e7ee;
+  }
+  td {
+    padding: 14px 16px;
+    vertical-align: middle;
+    border-bottom: 1px solid #eef0f5;
+  }
+  tr:last-child td {
+    border-bottom: 0;
+  }
+}
+
+.title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  strong {
+    font-size: 15px;
+  }
+  span {
+    font-size: 13px;
+    color: #475569;
+  }
+}
+
+.date {
+  white-space: nowrap;
+  color: #334155;
+}
+
+.badge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  &.DRAFT {
+    background: #f1f5f9;
+    color: #475569;
+  }
+  &.PUBLISHED {
+    background: #ecfdf5;
+    color: #047857;
+  }
+  &.CANCELLED {
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+}
+
+.fill {
+  min-width: 150px;
+  .gauge {
+    display: block;
+    height: 6px;
+    margin-bottom: 6px;
+    border-radius: 3px;
+    background: #eef0f5;
+    overflow: hidden;
+    span {
+      display: block;
+      height: 100%;
+      background: var(--mat-sys-primary);
+    }
+  }
+  .seats {
+    font-size: 13px;
+    color: #475569;
+    white-space: nowrap;
+  }
+}
+
+.actions {
+  text-align: right;
+  white-space: nowrap;
+  button + button {
+    margin-left: 6px;
+  }
+}
+
+button.danger {
+  --mat-button-outlined-label-text-color: #b91c1c;
+  --mat-button-outlined-outline-color: #fecaca;
+  --mat-button-text-label-text-color: #b91c1c;
+}
+
+mat-paginator {
+  margin-top: 12px;
+  background: transparent;
+}
+
+.banner {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  &.success {
+    background: #ecfdf5;
+    color: #064e3b;
+  }
+  &.danger {
+    background: #fef2f2;
+    color: #991b1b;
+  }
+}
+
+.feedback:empty {
+  display: none;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  text-align: center;
+  color: #475569;
+  background: #fff;
+  border: 1px dashed #cbd2de;
+  border-radius: 16px;
+  p {
+    margin: 0;
+    font-size: 16px;
+  }
+}
+
+// Phones: each row becomes a card (the table header is hidden, every cell keeps its meaning by its content).
+@media (max-width: 820px) {
+  .page-header h1 {
+    font-size: 26px;
+  }
+  .filters {
+    display: flex;
+    overflow-x: auto;
+  }
+  .events {
+    border: 0;
+    background: transparent;
+    thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    tbody,
+    tr,
+    td {
+      display: block;
+    }
+    tr {
+      margin-bottom: 12px;
+      padding: 14px 16px;
+      background: #fff;
+      border: 1px solid #e4e7ee;
+      border-radius: 16px;
+    }
+    td {
+      padding: 4px 0;
+      border: 0;
+    }
+    td.title {
+      display: flex;
+      padding-bottom: 8px;
+    }
+  }
+  .actions {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 10px !important;
+    text-align: left;
+    button + button {
+      margin-left: 0;
+    }
+  }
+}

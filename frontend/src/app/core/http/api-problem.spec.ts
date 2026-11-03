@@ -30,6 +30,13 @@ describe('ApiProblem', () => {
     expect(ApiProblem.from(new HttpErrorResponse({ status, error: '<html>' })).code).toBe(code);
   });
 
+  it('reads a problem received as text, by calls that expect no JSON', () => {
+    const problem = ApiProblem.from(
+      new HttpErrorResponse({ status: 409, error: '{"code":"EVENT_HAS_RESERVATIONS"}' }),
+    );
+    expect(problem.code).toBe('EVENT_HAS_RESERVATIONS');
+  });
+
   it('ignores malformed field errors', () => {
     const problem = ApiProblem.from(
       new HttpErrorResponse({
