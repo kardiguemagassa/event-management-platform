@@ -171,6 +171,66 @@ check "token issued by another realm" 401 UNAUTHENTICATED
 AUTH=none call GET "/api/events/$E"; check "anonymous read of the public catalog" 200
 call POST "/api/events/$E/capacity/reserve" '{}'; check "internal capacity route closed at the edge" 403 ACCESS_DENIED
 
+echo "== Catalog filters"
+# The search texts are percent-encoded by hand: call() passes the path as is. count: elements of a page.
+count() { python3 -c 'import json,sys;print(len(json.loads(sys.argv[1])["content"]))' "$BODY" 2>/dev/null; }
+AUTH=none call GET "/api/events?q=docker%20day&from=2027-03-15T18:00:00Z&ids=$E"
+[ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  search by text, start and ids finds the event"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  catalog search -> $CODE body=$BODY"; }
+AUTH=none call GET "/api/events?q=docker%20day&from=2027-03-15T18:00:01Z"
+[ "$CODE" = 200 ] && [ "$(count)" = 0 ] && { PASS=$((PASS+1)); echo "PASS  events starting earlier are left out"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  catalog from filter -> $CODE body=$BODY"; }
+call GET "/api/events?organizer=me&status=DRAFT"; check "organizer lists their own drafts" 200
+AUTH=$(attendee_token 1) call GET "/api/events?organizer=me"; check "own events need the ORGANIZER role" 403 ACCESS_DENIED
+AUTH=none call GET "/api/events?from=tomorrow"; check "malformed filter" 400 VALIDATION_FAILED
+
+# The web application (nginx) is the browser's single origin: it serves the Angular build and relays the gateway paths.
+echo "== Web application (nginx, same origin as the API)"
+W=http://127.0.0.1:4200
+headers=$(curl -s -D - -o /tmp/e2e-web.html "$W/catalogue?q=paris")
+grep -q '<app-root' /tmp/e2e-web.html && echo "$headers" | grep -qi "^content-security-policy: default-src 'self'" \
+  && { PASS=$((PASS+1)); echo "PASS  application served on every client-side route, with its CSP"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  web application not served: $(echo "$headers" | head -1)"; }
+G=$W AUTH=none call GET /bff/me; check "session endpoint relayed to the gateway" 401
+G=$W AUTH=none call GET "/api/events/$E"; check "API relayed to the gateway" 200
+
+# What a browser does, scripted: sign in on the Keycloak page through the gateway (BFF), then call the API with the
+# session cookie only. On localhost: the address registered as redirect URI of the event-platform-bff client.
+echo "== Browser session (BFF)"
+B=http://localhost:8080
+JAR=$(mktemp)
+bff() { curl -s -c "$JAR" -b "$JAR" "$@"; }
+LOGIN_PAGE=$(bff -o /dev/null -w '%{redirect_url}' "$B/oauth2/authorization/keycloak")
+LOGIN_HTML=$(bff "$LOGIN_PAGE")
+# The realm's login theme (keycloak/themes): its stylesheet, and the French title of the page.
+[[ "$LOGIN_HTML" == *"/event-platform/css/event-platform.css"* && "$LOGIN_HTML" == *"Connexion"* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  login page served with the platform theme, in French"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  login page theme: ${LOGIN_HTML:0:300}"; }
+LOGIN_ACTION=$(printf '%s' "$LOGIN_HTML" | python3 -c '
+import html, re, sys
+form = re.search(r"<form[^>]*kc-form-login[^>]*>", sys.stdin.read())
+action = re.search(r"action=\"([^\"]+)\"", form.group(0)) if form else None
+print(html.unescape(action.group(1)) if action else "")')
+CALLBACK=$(bff -o /dev/null -w '%{redirect_url}' --data-urlencode "username=$E2E_USER" \
+  --data-urlencode "password=$E2E_PASSWORD" "$LOGIN_ACTION")
+bff -o /dev/null "$CALLBACK"   # code exchanged by the gateway: session cookie, then redirect to the front-end
+ME=$(bff "$B/bff/me")
+[[ "$ME" == *"\"email\":\"$E2E_USER\""* && "$ME" == *ORGANIZER* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  browser login through the gateway: session cookie, /bff/me with the realm roles"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  browser login (callback ${CALLBACK:0:80}) /bff/me: ${ME:0:200}"; }
+SESSION_CODE=$(bff -o /dev/null -w '%{http_code}' "$B/api/registrations/me")
+[ "$SESSION_CODE" = 200 ] \
+  && { PASS=$((PASS+1)); echo "PASS  API call with the session cookie only: the gateway relays the access token"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  API call with the session cookie -> $SESSION_CODE"; }
+NO_CSRF=$(bff -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$B/api/registrations")
+XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$JAR" | tail -1)
+LOGOUT=$(bff -X POST -H "X-XSRF-TOKEN: $XSRF" "$B/logout")
+AFTER=$(bff -o /dev/null -w '%{http_code}' "$B/bff/me")
+[[ "$NO_CSRF" = 403 && -n "$XSRF" && "$LOGOUT" == *"/protocol/openid-connect/logout?"* && "$AFTER" = 401 ]] \
+  && { PASS=$((PASS+1)); echo "PASS  session write refused without CSRF token; logout ends the session and points to Keycloak"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  CSRF ($NO_CSRF, token ${XSRF:+present}) logout (${LOGOUT:0:120}) then /bff/me -> $AFTER"; }
+rm -f "$JAR"
+
 echo "== Business rules"
 register 1; check "register attendee 1" 201; R1=$(field id)
 register 1; check "duplicate attendee 1" 409 ALREADY_REGISTERED
@@ -178,15 +238,26 @@ register 2; check "register attendee 2" 201; R2=$(field id)
 AUTH=$(attendee_token 2) call POST "/api/registrations/$R1/cancel"
 check "another attendee cannot cancel the registration" 404 REGISTRATION_NOT_FOUND
 call GET "/api/registrations/events/$E"; check "organizer lists the registrations of the event" 200
+# Attendee names come from user-service (internal names route, PROFILE_READER service account).
+names() { python3 -c 'import json,sys;print(",".join(sorted(str(r.get("attendeeName")) for r in json.loads(sys.argv[1])["content"])))' "$BODY" 2>/dev/null; }
+call GET "/api/registrations/events/$E?status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(names)" = "Attendee 1,Attendee 2" ] \
+  && { PASS=$((PASS+1)); echo "PASS  confirmed registrations carry the attendee names"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  attendee names -> $CODE body=$BODY"; }
+call GET "/api/users/names?ids=$(python3 -c 'import uuid;print(uuid.uuid4())')"
+check "internal names route closed at the edge" 403 ACCESS_DENIED
 AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_OTHER" "$E2E_PASSWORD") call GET "/api/registrations/events/$E"
 check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
 register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
-AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; echo "      cancel attendee 1 -> $CODE"
+AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; check "attendee 1 cancels their registration" 200
 register 3; check "register attendee 3 on freed seat" 201
+AUTH=$(attendee_token 3) call GET "/api/registrations/me?eventId=$E&status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  attendee finds their registration to the event"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  registration to the event -> $CODE body=$BODY"; }
 # Started in a known trace: its log line is looked up in Loki below.
 LOG_TRACE_ID=$(openssl rand -hex 16)
 TRACEPARENT="00-$LOG_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=$(attendee_token 2) call POST "/api/registrations/$R2/cancel"
-echo "      cancel attendee 2 -> $CODE (1 seat left for the outage test), trace $LOG_TRACE_ID"
+check "attendee 2 cancels their registration (1 seat left for the outage test, trace $LOG_TRACE_ID)" 200
 
 # Before the outage: these checks are about the content of traces, on a stable platform.
 # One request through gateway, registration-service and event-service (organizer lookup with the service
@@ -281,6 +352,34 @@ SEATS=$(field availableSeats)
 
 echo "== Right to erasure"
 AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204
+call GET "/api/registrations/events/$E?status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(names)" = "Attendee 3,None" ] \
+  && { PASS=$((PASS+1)); echo "PASS  a deleted profile leaves the registration listed without a name"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  name of a deleted profile -> $CODE body=$BODY"; }
+
+# Moderation: an administrator sees every event, reads who registered, finds and erases a profile, cancels the event.
+echo "== Administration"
+ADMIN_TOKEN=$(kc_token event-platform "$E2E_CLIENT" "$E2E_ADMIN" "$E2E_PASSWORD")
+call GET "/api/events?scope=all&ids=$E"; check "only administrators list every event" 403 ACCESS_DENIED
+AUTH=$ADMIN_TOKEN call GET "/api/events?scope=all&ids=$E"
+[ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  administrator lists every event"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  every event -> $CODE body=$BODY"; }
+AUTH=$ADMIN_TOKEN call GET "/api/registrations/events/$E?status=CONFIRMED"
+[ "$CODE" = 200 ] && [ "$(names)" = "Attendee 3,None" ] \
+  && { PASS=$((PASS+1)); echo "PASS  administrator reads the registrations of any event, with the names"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  registrations for the administrator -> $CODE body=$BODY"; }
+AUTH=$ADMIN_TOKEN call GET "/api/users?q=$(attendee 3)"   # e-mail of this run: unique
+A3=$(python3 -c 'import json,sys;c=json.loads(sys.argv[1])["content"];print(c[0]["id"] if len(c)==1 else "")' "$BODY" 2>/dev/null)
+[ "$CODE" = 200 ] && [ -n "$A3" ] && { PASS=$((PASS+1)); echo "PASS  administrator finds a profile by e-mail"; } \
+                                 || { FAIL=$((FAIL+1)); echo "FAIL  profile search -> $CODE body=$BODY"; }
+AUTH=$ADMIN_TOKEN call DELETE "/api/users/$A3"; check "administrator erases the profile" 204
+
+# Each run leaves its event cancelled: it no longer shows in the catalogue of published events.
+echo "== Cleanup"
+AUTH=$ADMIN_TOKEN call POST "/api/events/$E/cancel"; check "administrator cancels the event of an organizer" 200
+AUTH=none call GET "/api/events?status=PUBLISHED&ids=$E"
+[ "$CODE" = 200 ] && [ "$(count)" = 0 ] && { PASS=$((PASS+1)); echo "PASS  cancelled event left the catalogue"; } \
+                                       || { FAIL=$((FAIL+1)); echo "FAIL  cancelled event still listed -> $CODE body=$BODY"; }
 
 echo "== Result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

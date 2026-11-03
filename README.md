@@ -12,6 +12,7 @@ GitHub Actions.
 
 | Service | Responsibility |
 |---|---|
+| `web` | Angular application served by nginx (`http://localhost:4200`), the browser's single origin: it relays `/api`, `/bff` and the login paths to the gateway |
 | `api-gateway` | Single entry point: token validation, routing, circuit breakers with fallback, one Swagger UI for every service |
 | `discovery-server` | Eureka registry: services find each other by name |
 | `user-service` | Application profiles of the users (`/api/users/me`), keyed by their Keycloak id |
@@ -26,10 +27,12 @@ GitHub Actions.
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|"login :8180"| keycloak
-    client -->|"Bearer token :8080"| gateway
+    browser([Browser]) -->|":4200"| web
+    browser -->|"login :8180"| keycloak
+    client([API client]) -->|"Bearer token :8080"| gateway
 
     subgraph platform ["Docker network: default"]
+        web["web<br/>Angular, nginx"]
         keycloak["keycloak<br/>realm event-platform"]
         gateway["api-gateway<br/>Spring Cloud Gateway"]
         eureka["discovery-server<br/>Eureka"]
@@ -38,6 +41,7 @@ flowchart LR
         registrations[registration-service]
     end
 
+    web -->|"/api, /bff, login<br/>(session cookie)"| gateway
     gateway -->|"token relayed"| users & events & registrations
     registrations -->|"service account token:<br/>event, organizer, reserve / release seat"| events
     registrations -.->|"client credentials"| keycloak
@@ -52,7 +56,8 @@ flowchart LR
     gateway & users & events & registrations -.->|"register, discover"| eureka
 ```
 
-Each database sits on a private network shared with its own service only. Only the gateway (8080), Keycloak (8180),
+Each database sits on a private network shared with its own service only. Only the web application (4200), the
+gateway (8080), Keycloak (8180),
 Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200) publish a port, bound to
 `127.0.0.1`. Every service sends its traces and metrics to the collector over OTLP (not drawn).
 
@@ -66,7 +71,8 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | API | REST, RFC 9457 problem details, OpenAPI 3 (springdoc), Bean Validation |
 | Security | Keycloak 26 (OpenID Connect), Spring Security 7: OAuth2 resource server (JWT, RS256) and OAuth2 client (client credentials) |
 | Observability | OpenTelemetry (Spring Boot starter, Micrometer Tracing), W3C trace context, OTLP; Grafana, Tempo, Prometheus, Loki (`grafana/otel-lgtm`) in development |
-| Tests | JUnit 5, AssertJ, Mockito, Testcontainers, JaCoCo |
+| Web application | Angular 22 (standalone components, signals, zoneless), Angular Material 3, API client generated from the OpenAPI documents (`ng-openapi-gen`), nginx |
+| Tests | JUnit 5, AssertJ, Mockito, Testcontainers, JaCoCo; Vitest for the web application |
 | Delivery | Docker (multi-stage, multi-platform), Docker Compose, GitHub Actions, Trivy, Dependabot |
 
 ## Design decisions
@@ -88,7 +94,7 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Keys from the internal JWK set, public issuer and audience checked | No discovery call at startup; a token from another realm or for another audience is rejected |
 | Identity taken from the token, never from the request | Closes IDOR: a registration is made for the caller, a profile is the caller's own, an event belongs to its creator |
 | Roles for actions, ownership for objects | `ORGANIZER` may change events, but only their own (403); objects of others that are private do not exist for the caller (404) |
-| Client credentials for service-to-service calls | `registration-service` reserves seats with its own identity (`SEAT_MANAGER`), not the user's; the token is cached and renewed |
+| Client credentials for service-to-service calls | `registration-service` reserves seats (`SEAT_MANAGER`) and reads attendee names (`PROFILE_READER`) with its own identity, not the user's; the token is cached and renewed |
 | Shared `platform-security` library, imported explicitly | One implementation of token validation, role mapping and 401/403 problems; each service keeps its own access rules |
 | OpenTelemetry through Spring Boot's starter, no Java agent | Vendor-neutral standard (OTLP): the backend can become Datadog, Dynatrace or Elastic without code change; nothing to add to the images |
 | Noise dropped before export | Health probes, Eureka heartbeats and Spring Security filter spans would bury the business traces at 100 % sampling |
@@ -105,22 +111,69 @@ the Keycloak admin console.
 | `ATTENDEE` | every new user (default role) | registering to events, cancelling one's own registrations |
 | `ORGANIZER` | by an administrator | creating events, and changing, publishing, cancelling or deleting one's own |
 | `SEAT_MANAGER` | the `registration-service` service account only | reserving and releasing seats |
-| `ADMIN` | by an administrator | reading and deleting any user profile |
+| `PROFILE_READER` | the `registration-service` service account only | reading the display names of users |
+| `ADMIN` | by an administrator | moderation: searching and deleting any user profile, listing every event (drafts included), reading who registered to any event, cancelling any event |
 
 | Route | Access |
 |---|---|
-| `GET /api/events`, `GET /api/events/{id}` | public; a draft is visible to its organizer only |
-| other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`) |
+| `GET /api/events`, `GET /api/events/{id}` | public; a draft is visible to its organizer (and `ADMIN`) only |
+| `GET /api/events?organizer=me` | `ORGANIZER`: every event of the caller, drafts and cancelled ones included |
+| `GET /api/events?scope=all` | `ADMIN`: every event of every organizer, drafts included |
+| `POST /api/events/{id}/cancel` | `ORGANIZER` of the event, or `ADMIN` (moderation, audited) |
+| other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`); an administrator cancels but never edits, publishes or deletes the event of another |
 | `/api/events/{id}/capacity/**` | `SEAT_MANAGER`; closed at the gateway |
 | `POST /api/registrations`, `POST /api/registrations/{id}/cancel` | `ATTENDEE`, own registrations only (others are `404`) |
 | `GET /api/registrations/me`, `GET /api/registrations/{id}` | authenticated, own registrations only |
-| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event |
+| `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event, or `ADMIN` (audited); each registration carries the attendee's display name |
 | `GET` `PUT` `DELETE /api/users/me` | authenticated, one's own profile |
-| `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN` |
+| `GET /api/users/names` | `PROFILE_READER`; closed at the gateway |
+| `GET /api/users`, `GET` `DELETE /api/users/{id}` | `ADMIN`; the list searches by name or e-mail (`q`) and by ids; a deletion is audited |
 
-Clients: `event-platform-web` (public, Authorization Code with PKCE, for the future front-end) and
-`registration-service` (confidential, client credentials, its secret comes from `.env`). The access tokens carry the
-audience `event-platform-api`, checked by every service.
+Clients, all issuing access tokens with the audience `event-platform-api`, checked by every service:
+
+| Client | Type | Used by |
+|---|---|---|
+| `event-platform-bff` | confidential, Authorization Code with PKCE, secret from `.env` | the gateway as Backend for Frontend (browser login) |
+| `event-platform-web` | public, Authorization Code with PKCE | the Swagger UI ("Authorize") |
+| `registration-service` | confidential, client credentials, secret from `.env` | `registration-service` calling `event-service` |
+
+### Backend for Frontend (browser login)
+
+A browser never holds a token: it signs in through the gateway, which keeps the tokens in its session and gives the
+browser an `HttpOnly` session cookie only (OAuth 2.0 for Browser-Based Apps, BFF pattern).
+
+| Endpoint | What it does |
+|---|---|
+| `GET /oauth2/authorization/keycloak` | starts the login on the Keycloak page; back on `/login/oauth2/code/keycloak`, then to the front-end (`BFF_FRONT_URL`, `http://localhost:4200/` by default) |
+| `GET /bff/me` | the signed-in user: `subject`, `name`, `email`, realm `roles` (from the ID token), or `401`; sets the `XSRF-TOKEN` cookie |
+| `/api/**` with the session cookie | the TokenRelay filter adds the session's access token, refreshed when expired; the services are unchanged |
+| `POST /logout` | ends the gateway session and answers `{"logoutUrl": ...}`: the Keycloak end-session URL the front-end navigates to, so that single sign-on does not log the user back in |
+
+- **CSRF**: a write sent with the session cookie needs the `X-XSRF-TOKEN` header (value of the `XSRF-TOKEN` cookie,
+  which Angular's `HttpClient` sends natively). Bearer-token calls are not checked: a browser never sends a bearer token
+  on its own.
+- **Bearer tokens still work** next to sessions (Swagger UI, API clients, tests): one gateway, two ways in.
+- **Sessions in memory**: one gateway instance. Several replicas would share them through Spring Session and Redis.
+
+### Login pages (Keycloak theme)
+
+The sign-in and sign-up pages are Keycloak's own (the password never reaches the application), with the look of the
+web application: theme `event-platform` in `keycloak/themes`, mounted into the container and selected in the realm
+(`loginTheme`, French as the only and default language).
+
+- It extends Keycloak's plain `base` theme: the forms, their CSRF protection and the brute-force detection stay
+  Keycloak's; only `template.ftl` is overridden (brand, lead, link back to the application), plus a stylesheet, the
+  French wording of the application and the fonts, served by Keycloak itself.
+- Upgrading Keycloak: compare `template.ftl` with `themes/src/main/resources/theme/base/login/template.ftl` of the new
+  version (the three changes are marked "Event Platform").
+- A realm imported before the theme keeps its settings (an import never overwrites a realm). To apply them:
+
+```bash
+docker compose exec keycloak sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 \
+  --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null &&
+  /opt/keycloak/bin/kcadm.sh update realms/event-platform -s loginTheme=event-platform \
+    -s internationalizationEnabled=true -s "supportedLocales=[\"fr\"]" -s defaultLocale=fr'
+```
 
 ## Observability
 
@@ -175,9 +228,25 @@ URI of the client.
 
 | Resource | Endpoints |
 |---|---|
-| Users (profiles) | `GET` `PUT` `DELETE` `/api/users/me`, `GET /api/users`, `GET` `DELETE` `/api/users/{id}` |
+| Users (profiles) | `GET` `PUT` `DELETE` `/api/users/me`, `GET /api/users`, `GET` `DELETE` `/api/users/{id}`, `GET /api/users/names` (used by `registration-service`) |
 | Events | `GET` `POST` `/api/events`, `GET` `PUT` `DELETE` `/api/events/{id}`, `POST /api/events/{id}/publish`, `POST /api/events/{id}/cancel`, `POST /api/events/{id}/capacity/reserve` and `.../release` (used by `registration-service`) |
 | Registrations | `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/{id}`, `POST /api/registrations/{id}/cancel`, `GET /api/registrations/events/{eventId}` |
+
+`GET /api/events` takes optional filters, combined with AND, on top of pagination (`page`, `size` up to 100) and
+sorting (`sort=startAt|createdAt|title[,asc|desc]`):
+
+| Parameter | Filter |
+|---|---|
+| `status` | `DRAFT`, `PUBLISHED` or `CANCELLED` |
+| `q` | title or location containing the text, case-insensitive (100 characters max) |
+| `from` | events starting at or after this instant, ISO-8601 (`2026-12-01T00:00:00Z`) |
+| `organizer=me` | the caller's own events, whatever their status (`ORGANIZER` role) |
+| `ids` | batch read of up to 100 events, comma-separated; events the caller cannot see are left out |
+
+A malformed or out-of-range filter is a `400 VALIDATION_FAILED` naming the parameter in `errors`.
+
+`GET /api/registrations/me` takes `eventId` and `status` (`CONFIRMED`, `CANCELLED`): with both, it tells whether the
+caller is registered to an event, which the event page uses.
 
 Errors are RFC 9457 problem details with a stable `code` (the HTTP status of each case is listed in the Swagger UI):
 
@@ -205,11 +274,12 @@ a change of that file, recreate its volume (`docker volume rm event-platform_key
 
 ```bash
 docker compose --profile app up -d --build
-docker compose --profile app ps          # wait until the 11 containers are (healthy)
+docker compose --profile app ps          # wait until the 12 containers are (healthy)
 ```
 
 | URL                                     | Purpose                                            |
 |-----------------------------------------|----------------------------------------------------|
+| `http://localhost:4200`                 | Web application (sign in with a realm user)        |
 | `http://localhost:8080`                 | API Gateway, the single entry point                |
 | `http://localhost:8080/swagger-ui.html` | Swagger UI of all services (Select a definition)   |
 | `http://localhost:8761`                 | Eureka dashboard                                   |
@@ -228,6 +298,12 @@ Then start `discovery-server` first, followed by the other services. The aggrega
 (`http://localhost:8080/swagger-ui.html`), and each service also serves its own, for example
 `http://localhost:8083/swagger-ui/index.html`.
 
+The web application in development, with live reload (gateway on `localhost:8080`, Node.js 24):
+
+```bash
+cd frontend && npm ci && npm start       # http://localhost:4200, /api, /bff and the login paths proxied to the gateway
+```
+
 > Do not run both options at the same time. Containers publish on `127.0.0.1` while the IDE binds every
 > interface, so both can hold the same port and register in the same Eureka, which mixes the instances.
 > Stop one option before starting the other (`docker compose --profile app stop`).
@@ -238,20 +314,53 @@ The public client only supports the browser login flow (Authorization Code with 
 the end-to-end script shows the whole recipe: it creates a test client with the password grant and test users
 through the Keycloak admin API, then deletes them on exit. Such a client must never exist outside development.
 
+### Browser tests (Playwright)
+
+`e2e/` drives the web application in Chromium, as its users do, on the platform started with Docker (option 1):
+
+- identities: an attendee, an organizer and an administrator created through the Keycloak admin API (credentials from
+  `.env`), each signing in once through the real login page (Backend for Frontend session, saved and reused), and an
+  address for the sign-up test; all deleted at the end, with their profiles and the events of the run;
+- visitor: catalogue and search, event page, sign-in to register and back to the event, the way back from the login
+  page;
+- sign-up on the Keycloak page (French error for a too short password), then the welcome page;
+- one event across the roles: created, published and edited by the organizer, an attendee registers (seats left go
+  down), the organizer sees the attendee's name, an administrator cancels it and the attendee sees it cancelled, then
+  finds the attendee's profile;
+- accessibility: axe-core with the WCAG 2.1 A and AA rules on the main page of each role and on the login page; a
+  serious or critical violation fails the test;
+- phone layout (Pixel 7): the bottom bar instead of the top navigation.
+
+```bash
+cd e2e && npm ci && npx playwright install chromium
+npx playwright test              # against http://localhost:4200 and http://localhost:8180
+npx playwright test --ui         # step by step, with the DOM and the network of each step
+```
+
+On a failure, the trace (each step with its DOM, network and console) and a screenshot are kept; in CI they are
+uploaded with the HTML report.
+
 ### End-to-end smoke test
 
 ```bash
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (34 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (59 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
+- web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
+  gateway on the same origin;
+- browser session (BFF): login page served with the platform theme, login scripted on it through the gateway, `/bff/me` with the realm roles, an API
+  call with the session cookie only (token relayed), a write refused without the CSRF token, logout;
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
   attendee cancelling a registration (`404`);
-- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation;
+- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation, an attendee finding
+  their registration to an event; the event is cancelled at the end so that runs do not pile up in the catalogue;
+- administration: every event listed (`scope=all`, refused to an organizer), registrations of any event with the names,
+  a profile found by e-mail then erased, the event of an organizer cancelled (moderation);
 - resilience: `event-service` outage (fast `503` once the instance has left discovery, gateway fallback), recovery after restart,
   and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
@@ -269,6 +378,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (34 c
   intervals (development values; production keeps the defaults).
 - One private network per service and its database: a database is reachable by its owner only.
 - Health checks on `/actuator/health/readiness`, used to order the startup.
+- JVM sized for the container: G1 chosen explicitly (the JVM would pick the single-threaded Serial collector below
+  2 CPUs or 1792 MB, measured at 6 s pauses), heap at 60 % of the 512 MB limit.
 
 ### Running a published release
 
@@ -277,7 +388,7 @@ Every merge to `main` and every `vX.Y.Z` tag publishes images for `linux/amd64` 
 Each image is scanned with Trivy (no fixable critical vulnerability) and carries an SBOM and build provenance.
 
 ```bash
-export IMAGE_NAMESPACE=kardigue IMAGE_TAG=0.3.0
+export IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0.0
 docker compose --profile app pull
 docker compose --profile app up -d --no-build
 ```
@@ -289,13 +400,40 @@ docker compose --profile app down        # keeps the data volumes
 docker compose --profile app down -v     # also deletes the databases
 ```
 
+## Web application
+
+`frontend/` is an Angular application in French, built after the validated mockups (indigo theme, Inter and Plus Jakarta
+Sans served from the application itself, never from a font CDN).
+
+| Topic | Choice |
+|---|---|
+| Sign-in | Backend for Frontend: no token in the browser. `GET /bff/me` tells who is signed in, "Se connecter" goes to `/oauth2/authorization/keycloak`, "Se déconnecter" posts `/logout` then follows the Keycloak logout URL |
+| CSRF | `HttpClient` sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header on writes: the names Spring Security uses by default |
+| Same origin | nginx in Docker, the dev-server proxy (`proxy.conf.json`) in development; the `Host` header is kept so that the gateway builds the OAuth2 redirect URI on `localhost:4200` |
+| API client | Generated from `frontend/openapi/*.json` with `ng-openapi-gen`, committed. CI fails if the client is not regenerated, and the e2e job fails if a service no longer serves the committed document |
+| Errors | One interceptor turns every failure into an `ApiProblem`: the stable `code` of the RFC 9457 problem and a message in French, also for calls generated with a text response (`DELETE`), which receive the problem as unparsed JSON |
+| Profile | A signed-in user without an application profile (first sign-in, or profile deleted) is welcomed first (`/bienvenue`, name pre-filled from the sign-in account), then sent back to the page asked; `/profil` changes the name, signs out, and erases the profile (right to erasure) |
+| Organizer space | `/organisation`, for the `ORGANIZER` role only: the organizer's own events, drafts included, filtered by status in the address (`?statut=brouillons`); publish a draft, cancel and delete after a confirmation dialog, delete offered only while nobody is registered. Events are created as drafts (`/organisation/nouveau`) and edited until cancelled (`/organisation/:id/modifier`), with the API's rules checked in the form first (lengths, start in the future, capacity not below the seats reserved); leaving with changes not saved asks first. `/organisation/:id/inscrits` lists the registrations of an event (confirmed by default, cancelled or all, newest first), with the attendee's display name |
+| Administration | `/administration`, for the `ADMIN` role only, link shown to administrators, one tab per section. Events: every event of every organizer, drafts included, newest first, with the organizer's name, search and status filter in the address, who registered, and cancellation after a confirmation (moderation; never edited nor deleted). Users: profiles newest first, search by name or e-mail in the address (`?q=`), deletion of a profile after a confirmation saying what stays (registrations, without the name; the sign-in account); one's own profile is deleted from "Mon compte" |
+| Security headers | Content Security Policy without inline script (`'self'` only), `nosniff`, no framing, strict referrer policy |
+| Accessibility | Skip link, landmarks, visible focus, live region for results, French labels for screen readers (paginator, gauges) |
+
+After a change of the API, with the platform running:
+
+```bash
+./scripts/openapi.sh update                  # fetch the OpenAPI documents through the gateway
+(cd frontend && npm run api:generate)        # regenerate the client in src/app/api, then commit both
+```
+
 ## Testing
 
 | Level | Tools | Scope |
 |---|---|---|
 | Unit | JUnit 5, AssertJ, Mockito, Spring Security Test | Domain rules (ownership, visibility), application services, HTTP adapters and access rules, the circuit breaker configuration on a real Resilience4j breaker |
 | Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs |
+| Web application | Vitest, Angular TestBed, `HttpTestingController` | Session (BFF), error mapping, guards, pages and components against a fake HTTP backend; coverage floor 85 % lines, 80 % branches (`npm test` in `frontend`) |
 | End to end | `scripts/e2e-docker.sh` | The whole platform in Docker with a real Keycloak, through the gateway only, including an outage and the recovery of `event-service` |
+| Browser | Playwright, axe-core | The user journeys in Chromium on the platform in Docker, signing in on the real Keycloak pages; WCAG 2.1 A/AA checks on the main pages; a phone layout (`e2e`, see below) |
 
 `./mvnw verify` runs the unit and integration tests (Docker is required for Testcontainers) and the coverage checks.
 JaCoCo measures unit and integration tests together; each module has a floor just below its measured coverage, so
@@ -314,12 +452,12 @@ coverage can only go up:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | Pull request to `dev` or `main`, push to `dev` | `build`: `./mvnw verify`, coverage table on the run page, reports as artifacts. `e2e`: the whole platform in Docker and the end-to-end scenario |
+| `ci.yml` | Pull request to `dev` or `main`, push to `dev` | `build`: `./mvnw verify`, coverage table on the run page, reports as artifacts. `frontend`: generated API client up to date, lint, format, unit tests, production build. `e2e`: the whole platform in Docker, the end-to-end scenario, the browser tests (Playwright report and traces uploaded on failure), and the OpenAPI documents of the front-end checked against the running services |
 | `release.yml` | Push to `main`, tag `vX.Y.Z` | Tests again, then for each image: build, Trivy scan (fails on any fixable critical vulnerability), build for `linux/amd64` and `linux/arm64`, push to Docker Hub with SBOM and provenance |
 | Dependabot | Weekly | Pull requests against `dev` for Maven dependencies, GitHub Actions and Docker base images |
 
 - Every action is pinned by commit SHA; workflow tokens are read-only (`contents: read`).
-- Rulesets on `dev` and `main`: changes through pull requests only, `build` and `e2e` required, no force push, no deletion.
+- Rulesets on `dev` and `main`: changes through pull requests only, `build`, `frontend` and `e2e` required, no force push, no deletion.
 - CI uses throwaway database passwords, Keycloak admin password and client secret generated (and masked) per run;
   the Docker Hub token is scoped to read and write, expires, and lives in the repository secrets only.
 
@@ -346,7 +484,14 @@ pull request would change `main` directly and require merging `main` back into `
   registration, the seat stays reserved. A transactional outbox with a message broker would make the saga reliable.
 - **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
   behind TLS, a fixed hostname and an external database for high availability.
-- **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console.
+- **No "forgot password" and no "remember me"**: resetting a password sends an e-mail, and the platform has no mail
+  server yet; long sessions are not offered on purpose. Keycloak's messages not reworded by the theme (rare pages) keep
+  its formal French ("vous").
+- **No administrator by default**: `ORGANIZER` and `ADMIN` are granted by hand in the Keycloak console. Roles are not
+  managed from the application: it would take a service account allowed to manage the users of the realm, the most
+  sensitive privilege of the platform.
+- **Audit trail in the logs**: administrator actions (cancelling the event of another, reading its registrations,
+  deleting a profile) are logged with the administrator's id, in Loki with their trace; not yet a dedicated audit store.
 - **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
 - **`otel-lgtm` is a development backend**: one container, no persistence, default Grafana account. Production would
   run a collector and the backends separately (or send OTLP to a vendor).
@@ -358,14 +503,14 @@ pull request would change `main` directly and require merging `main` back into `
   balancer caches catch up (short intervals in the `docker` profile; production defaults are longer).
 - **Swagger UI is always enabled**: it should be disabled in production (`springdoc.swagger-ui.enabled=false`).
 - **Gateway branch coverage is 64 %**: the error branches of its filters are the next tests to write.
+- **"Mes inscriptions" lists the 100 most recent registrations**: one page of registrations and one batch read of
+  their events (the API limits both to 100); paging through older ones is not offered yet.
 
 ## Roadmap
 
-- **Backend for Frontend**: with the Angular front-end, the gateway also becomes an OAuth2 client (login, session
-  cookie, token relay to the services), so that no token is ever stored in the browser.
-- **Observability**: trace id in the gateway's own errors, alert routing to an on-call channel.
-- **Keycloak login theme**: the sign-in and registration pages styled like the Angular front-end (Keycloakify or a
-  FreeMarker/CSS theme), still served by Keycloak.
-- **Reliability**: transactional outbox and messaging for the registration saga.
-- **Frontend**: Angular application served by nginx, proxying `/api` to the gateway (same origin, no CORS), with a
-  TypeScript client generated from the OpenAPI specifications and login through the gateway (BFF).
+| Version | Content |
+|---|---|
+| **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end tests (Playwright, axe-core) (done) |
+| **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
+| **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
+| **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

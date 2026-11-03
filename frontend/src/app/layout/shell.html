@@ -1,0 +1,74 @@
+<a class="skip-link" href="#main">Aller au contenu</a>
+
+<header class="top-bar">
+  <a class="brand" routerLink="/" aria-label="Event Platform, accueil">
+    <span class="brand-mark"><mat-icon svgIcon="calendar" aria-hidden="true" /></span>
+    <span class="brand-name">Event Platform</span>
+  </a>
+
+  <nav class="top-nav" aria-label="Navigation principale">
+    @for (item of navItems(); track item.link) {
+      <a
+        mat-button
+        [routerLink]="item.link"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: item.link === '/' }"
+        ariaCurrentWhenActive="page"
+        >{{ item.label }}</a
+      >
+    }
+  </nav>
+
+  <div class="account">
+    @if (session.user(); as user) {
+      <button mat-button [matMenuTriggerFor]="accountMenu" class="account-button">
+        <mat-icon svgIcon="account" aria-hidden="true" />
+        <span class="account-name">{{ user.name ?? user.email ?? 'Mon compte' }}</span>
+      </button>
+      <mat-menu #accountMenu="matMenu" xPosition="before">
+        <a mat-menu-item routerLink="/profil">
+          <mat-icon svgIcon="account" aria-hidden="true" />
+          <span>Mon compte</span>
+        </a>
+        <button mat-menu-item (click)="logout()" [disabled]="signingOut()">
+          <mat-icon svgIcon="logout" aria-hidden="true" />
+          <span>Se déconnecter</span>
+        </button>
+      </mat-menu>
+    } @else {
+      <button mat-flat-button (click)="login()">
+        <mat-icon svgIcon="login" aria-hidden="true" />
+        Se connecter
+      </button>
+    }
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+  <router-outlet />
+</main>
+
+<nav class="bottom-nav" aria-label="Navigation principale (mobile)">
+  @for (item of navItems(); track item.link) {
+    <a
+      [routerLink]="item.link"
+      routerLinkActive="active"
+      [routerLinkActiveOptions]="{ exact: item.link === '/' }"
+      ariaCurrentWhenActive="page"
+    >
+      <mat-icon [svgIcon]="item.icon" aria-hidden="true" />
+      {{ item.label }}
+    </a>
+  }
+  @if (session.authenticated()) {
+    <a routerLink="/profil" routerLinkActive="active" ariaCurrentWhenActive="page">
+      <mat-icon svgIcon="account" aria-hidden="true" />
+      Compte
+    </a>
+  } @else {
+    <button type="button" (click)="login()">
+      <mat-icon svgIcon="account" aria-hidden="true" />
+      Connexion
+    </button>
+  }
+</nav>

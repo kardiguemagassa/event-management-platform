@@ -1,0 +1,320 @@
+/*
+ * Event Platform login theme: the look of the web application (frontend/src/styles.scss) over Keycloak's "base"
+ * templates. Fonts served by Keycloak itself (no font CDN); class names declared in theme.properties.
+ */
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('../fonts/plus-jakarta-sans-latin-wght-normal.woff2') format('woff2');
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+:root {
+  --ep-primary: #4338ca;
+  --ep-primary-dark: #3730a3;
+  --ep-ink: #0f172a;
+  --ep-muted: #475569;
+  --ep-line: #d4d8e2;
+  --ep-bg: #f6f7fb;
+  --ep-danger: #b91c1c;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html.ep,
+html.ep body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--ep-bg);
+  color: var(--ep-ink);
+  font: 15px/1.5 'Inter', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+.ep-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 48px 16px;
+}
+
+/* Brand */
+.ep-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 28px;
+  color: var(--ep-ink);
+  font: 700 20px 'Plus Jakarta Sans', sans-serif;
+  text-decoration: none;
+}
+.ep-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--ep-primary);
+}
+.ep-brand-mark svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Card */
+.ep-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 32px;
+  background: #fff;
+  border: 1px solid #e4e7ee;
+  border-radius: 20px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%), 0 8px 24px rgb(15 23 42 / 6%);
+}
+#kc-page-title {
+  margin: 0;
+  font: 700 26px/1.2 'Plus Jakarta Sans', sans-serif;
+}
+.ep-lead {
+  margin: 6px 0 0;
+  color: var(--ep-muted);
+}
+.ep-card-header {
+  margin-bottom: 24px;
+}
+/* Every field is required: no asterisk, no "required fields" note. */
+.ep-card-header .subtitle,
+.required {
+  display: none;
+}
+
+/* Username already given (later steps): shown with a link to start again. */
+#kc-username {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--ep-bg);
+  border-radius: 12px;
+}
+#kc-attempted-username {
+  font-weight: 600;
+}
+.kc-tooltip-text {
+  font-size: 14px;
+}
+
+/* Messages */
+.ep-alert {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+.alert-error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.alert-warning {
+  background: #fffbeb;
+  color: #92400e;
+}
+.alert-success {
+  background: #ecfdf5;
+  color: #064e3b;
+}
+.alert-info {
+  background: #eef2ff;
+  color: #3730a3;
+}
+.pf-c-alert__icon:empty,
+.pf-c-alert__icon > span:empty {
+  display: none;
+}
+
+/* Forms */
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+}
+.ep-group {
+  margin: 0;
+}
+.ep-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.ep-input {
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--ep-line);
+  border-radius: 12px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+.ep-input:focus {
+  border-color: var(--ep-primary);
+  outline: 2px solid var(--ep-primary);
+  outline-offset: 1px;
+}
+.ep-input[aria-invalid='true'] {
+  border-color: var(--ep-danger);
+}
+.ep-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--ep-danger);
+  font-size: 13px;
+}
+
+/* Password with its show / hide button (Keycloak's passwordVisibility.js swaps the icon class and the label). */
+.ep-input-group {
+  position: relative;
+}
+.ep-input-group .ep-input {
+  padding-right: 52px;
+}
+.ep-toggle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ep-primary);
+  cursor: pointer;
+}
+.ep-toggle:hover {
+  background: #eef2ff;
+}
+.ep-toggle:focus-visible {
+  outline: 2px solid var(--ep-primary);
+}
+.ep-icon-show,
+.ep-icon-hide {
+  display: block;
+  width: 20px;
+  height: 20px;
+  background: currentColor;
+  -webkit-mask: var(--ep-icon) center / contain no-repeat;
+  mask: var(--ep-icon) center / contain no-repeat;
+}
+.ep-icon-show {
+  --ep-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+}
+.ep-icon-hide {
+  --ep-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6'/%3E%3C/svg%3E");
+}
+
+/* Options under the password (remember me, forgot password): no empty space when the realm offers neither. */
+.ep-group:not(:has(input, a, label, select, textarea, button)) {
+  display: none;
+}
+
+/* Buttons */
+.ep-button {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  border-radius: 999px;
+  font: 600 15px 'Inter', sans-serif;
+  cursor: pointer;
+}
+.ep-button-primary {
+  background: var(--ep-primary);
+  color: #fff;
+}
+.ep-button-primary:hover {
+  background: var(--ep-primary-dark);
+}
+.ep-button:focus-visible {
+  outline: 2px solid var(--ep-primary);
+  outline-offset: 2px;
+}
+
+/* Registration: the button first, then the way back to the sign-in. */
+#kc-register-form .ep-group:has(> #kc-form-buttons) {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 20px;
+}
+#kc-register-form #kc-form-options {
+  padding-top: 20px;
+  border-top: 1px solid #eef0f5;
+  color: var(--ep-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* Sign-up offer under the sign-in form. */
+.ep-alt {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #eef0f5;
+  color: var(--ep-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+a {
+  color: var(--ep-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+a:hover,
+a:focus-visible {
+  text-decoration: underline;
+}
+
+.ep-back {
+  margin-top: 20px;
+  font-size: 14px;
+}
+
+/* Error and information pages: the link back is the one under the card. */
+#kc-error-message #backToApplication {
+  display: none;
+}
+/* Error and information pages */
+.instruction {
+  margin: 0 0 12px;
+  color: var(--ep-muted);
+}
+
+@media (max-width: 480px) {
+  .ep-page {
+    padding: 28px 16px;
+  }
+  .ep-card {
+    padding: 24px 20px;
+    border-radius: 16px;
+  }
+}

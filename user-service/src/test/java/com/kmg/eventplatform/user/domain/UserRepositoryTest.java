@@ -8,6 +8,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +49,20 @@ class UserRepositoryTest {
 
         assertThat(repository.existsByEmailAndIdNot("ada@example.com", ada.getId())).isFalse();
         assertThat(repository.existsByEmailAndIdNot("ada@example.com", grace.getId())).isTrue();
+    }
+
+    @Test
+    void searchFindsANameOrAnEmailIgnoringCaseAndWildcards() {
+        User ada = repository.saveAndFlush(User.register(UUID.randomUUID(), "Ada Lovelace", "ada@example.com", NOW));
+        User grace = repository.saveAndFlush(User.register(UUID.randomUUID(), "Grace Hopper", "g_hopper@navy.mil", NOW));
+        repository.saveAndFlush(User.register(UUID.randomUUID(), "Alan Turing", "alan@example.org", NOW));
+
+        assertThat(repository.findAll(UserSpecifications.nameOrEmailContains("LOVE"))).containsExactly(ada);
+        assertThat(repository.findAll(UserSpecifications.nameOrEmailContains("navy"))).containsExactly(grace);
+        assertThat(repository.findAll(UserSpecifications.nameOrEmailContains("g_h"))).containsExactly(grace);
+        assertThat(repository.findAll(UserSpecifications.nameOrEmailContains("_"))).containsExactly(grace);
+        assertThat(repository.findAll(UserSpecifications.idIn(List.of(ada.getId(), grace.getId()))))
+                .containsExactlyInAnyOrder(ada, grace);
     }
 
     @Test

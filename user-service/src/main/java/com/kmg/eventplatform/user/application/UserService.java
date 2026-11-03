@@ -1,15 +1,24 @@
 package com.kmg.eventplatform.user.application;
 
+import static com.kmg.eventplatform.user.domain.UserSpecifications.idIn;
+import static com.kmg.eventplatform.user.domain.UserSpecifications.nameOrEmailContains;
+
 import com.kmg.eventplatform.user.domain.User;
 import com.kmg.eventplatform.user.domain.UserRepository;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional(readOnly = true)
 public class UserService {
+
+    private static final Logger log = LoggerFactory.getLogger(UserService.class);
 
     /** Unique constraint of migration V1. */
     static final String EMAIL_UNIQUE_CONSTRAINT = "uk_users_email";
@@ -62,13 +73,39 @@ public class UserService {
         return repository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
     }
 
-    public Page<User> list(Pageable pageable) {
-        return repository.findAll(pageable);
+    /** Profiles of these users; users without a profile are left out. */
+    public List<User> findAllById(Collection<UUID> ids) {
+        return repository.findAllById(ids);
     }
 
+    /**
+     * Profiles for the administration, optionally filtered.
+     *
+     * @param text name or e-mail containing this text (case-insensitive), {@code null} or blank for any
+     * @param ids  only these users, {@code null} or empty for any
+     */
+    public Page<User> list(String text, Collection<UUID> ids, Pageable pageable) {
+        List<Specification<User>> criteria = new ArrayList<>();
+        if (text != null && !text.isBlank()) {
+            criteria.add(nameOrEmailContains(text.strip()));
+        }
+        if (ids != null && !ids.isEmpty()) {
+            criteria.add(idIn(ids));
+        }
+        return repository.findAll(Specification.allOf(criteria), pageable);
+    }
+
+    /** Right to erasure: the caller deletes their own profile. */
     @Transactional
     public void delete(UUID id) {
         repository.delete(getById(id));
+    }
+
+    /** An administrator deletes the profile of another user. Audited: it erases someone else's personal data. */
+    @Transactional
+    public void deleteAsAdministrator(UUID id, UUID administratorId) {
+        repository.delete(getById(id));
+        log.info("Audit: administrator {} deleted the profile of user {}", administratorId, id);
     }
 
     /**

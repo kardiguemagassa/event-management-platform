@@ -2,11 +2,13 @@ package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventFullException;
+import com.kmg.eventplatform.registration.application.EventRegistration;
 import com.kmg.eventplatform.registration.application.NotEventOrganizerException;
 import com.kmg.eventplatform.registration.application.RegistrationNotFoundException;
 import com.kmg.eventplatform.registration.application.RegistrationService;
 import com.kmg.eventplatform.registration.domain.Registration;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
+import com.kmg.eventplatform.registration.domain.RegistrationStatus;
 import com.kmg.eventplatform.registration.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,8 +39,12 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -126,8 +132,22 @@ class RegistrationControllerTest {
     }
 
     @Test
+    void administratorListsTheRegistrationsOfAnyEvent() throws Exception {
+        UUID admin = UUID.randomUUID();
+        when(service.findByEventAsAdministrator(eq(eventId), isNull(), eq(admin), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(new EventRegistration(registration, "Ada Lovelace")),
+                        PageRequest.of(0, 20), 1));
+
+        anonymous.perform(get("/api/registrations/events/{eventId}", eventId).with(caller(admin, "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].attendeeName").value("Ada Lovelace"));
+
+        verify(service, never()).findByEvent(any(), any(), any(), any());
+    }
+
+    @Test
     void organizerOfAnotherEventIsForbidden() throws Exception {
-        when(service.findByEvent(eq(eventId), eq(userId), argThat(newestFirst())))
+        when(service.findByEvent(eq(eventId), isNull(), eq(userId), argThat(newestFirst())))
                 .thenThrow(new NotEventOrganizerException(eventId));
 
         mockMvc.perform(get("/api/registrations/events/{eventId}", eventId))
@@ -137,12 +157,32 @@ class RegistrationControllerTest {
 
     @Test
     void mineListsTheCallersRegistrations() throws Exception {
-        when(service.findByUser(eq(userId), argThat(newestFirst())))
+        when(service.findByUser(eq(userId), isNull(), isNull(), argThat(newestFirst())))
                 .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/api/registrations/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].userId").value(userId.toString()));
+    }
+
+    @Test
+    void mineFiltersByEventAndStatus() throws Exception {
+        when(service.findByUser(eq(userId), eq(eventId), eq(RegistrationStatus.CONFIRMED), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/registrations/me").param("eventId", eventId.toString()).param("status", "CONFIRMED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(registration.getId().toString()));
+    }
+
+    @Test
+    void mineRejectsAMalformedEventId() throws Exception {
+        mockMvc.perform(get("/api/registrations/me").param("eventId", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.eventId").exists());
+
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -253,15 +293,38 @@ class RegistrationControllerTest {
     }
 
     @Test
-    void listByEventIsPagedNewestFirstByDefault() throws Exception {
-        when(service.findByEvent(eq(eventId), eq(userId), argThat(newestFirst())))
-                .thenReturn(new PageImpl<>(List.of(registration), PageRequest.of(0, 20), 1));
+    void listByEventIsPagedNewestFirstByDefaultWithTheAttendeeNames() throws Exception {
+        when(service.findByEvent(eq(eventId), isNull(), eq(userId), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(new EventRegistration(registration, "Ada Lovelace")),
+                        PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/api/registrations/events/{eventId}", eventId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(registration.getId().toString()))
+                .andExpect(jsonPath("$.content[0].attendeeName").value("Ada Lovelace"))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.page").value(0));
+    }
+
+    @Test
+    void listByEventFiltersByStatus() throws Exception {
+        when(service.findByEvent(eq(eventId), eq(RegistrationStatus.CONFIRMED), eq(userId), argThat(newestFirst())))
+                .thenReturn(new PageImpl<>(List.of(new EventRegistration(registration, null)),
+                        PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/registrations/events/{eventId}", eventId).param("status", "CONFIRMED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].attendeeName").value(nullValue()));
+    }
+
+    @Test
+    void listByEventRejectsUnknownStatus() throws Exception {
+        mockMvc.perform(get("/api/registrations/events/{eventId}", eventId).param("status", "PENDING"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.status").exists());
+
+        verifyNoInteractions(service);
     }
 
     @Test

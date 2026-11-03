@@ -12,7 +12,7 @@ x-spring-service: &spring-service
   deploy:
     resources:
       limits:
-        # The JVM sizes its heap from this limit (MaxRAMPercentage=75 in the image).
+        # The JVM sizes its heap from this limit (MaxRAMPercentage=60 in the image, G1 collector).
         memory: 512M
 
 x-spring-environment: &spring-environment
@@ -117,12 +117,15 @@ services:
       KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HEALTH_ENABLED: "true"
-      # Placeholder resolved in the realm file at import: no secret in Git.
+      # Placeholders resolved in the realm file at import: no secret in Git.
       REGISTRATION_SERVICE_CLIENT_SECRET: ${REGISTRATION_SERVICE_CLIENT_SECRET:?REGISTRATION_SERVICE_CLIENT_SECRET is required}
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET:?BFF_CLIENT_SECRET is required}
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
     volumes:
       - ./keycloak:/opt/keycloak/data/import:ro
+      # Login pages with the look of the web application (theme "event-platform", selected in the realm).
+      - ./keycloak/themes:/opt/keycloak/themes:ro
     networks: [default, keycloak-net]
     depends_on:
       keycloak-db:
@@ -258,6 +261,9 @@ services:
         MODULE: api-gateway
     environment:
       <<: *spring-environment
+      # Backend for Frontend: confidential client secret, and Keycloak on the compose network for the token exchange.
+      BFF_CLIENT_SECRET: ${BFF_CLIENT_SECRET:?BFF_CLIENT_SECRET is required}
+      KEYCLOAK_REALM_URI: http://keycloak:8080/realms/event-platform
     # Single public entry point; the services themselves publish no port.
     ports:
       - "127.0.0.1:8080:8080"
@@ -267,6 +273,28 @@ services:
     healthcheck:
       <<: *healthcheck-timing
       test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health/readiness"]
+
+  # Web application (Angular, served by nginx), the browser's single origin: it relays /api, /bff and the OAuth2
+  # login paths to the gateway. http://localhost:4200 is a registered redirect URI of the event-platform-bff client.
+  web:
+    profiles: [app]
+    restart: unless-stopped
+    image: ${IMAGE_NAMESPACE:-local}/event-platform-web:${IMAGE_TAG:-dev}
+    build:
+      context: frontend
+    ports:
+      - "127.0.0.1:4200:8080"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    healthcheck:
+      <<: *healthcheck-timing
+      start_period: 5s
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
 
 volumes:
   user-db-data:

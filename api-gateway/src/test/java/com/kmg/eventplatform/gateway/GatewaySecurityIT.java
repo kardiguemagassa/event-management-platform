@@ -14,6 +14,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -120,6 +121,15 @@ class GatewaySecurityIT {
     }
 
     @Test
+    void userNamesRouteIsClosedAtTheEdgeEvenWithAValidToken() throws Exception {
+        HttpResponse<String> response = send("GET", "/api/users/names?ids=" + UUID.randomUUID(), TestTokens.valid());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"code\":\"ACCESS_DENIED\"");
+        assertThat(BACKEND.requests()).isZero();
+    }
+
+    @Test
     void circuitBreakerFallbackIsNotReachableFromOutside() throws Exception {
         assertThat(send("GET", "/fallback/unavailable", TestTokens.valid()).statusCode()).isEqualTo(403);
     }
@@ -127,6 +137,42 @@ class GatewaySecurityIT {
     @Test
     void healthProbesStayPublic() throws Exception {
         assertThat(send("GET", "/actuator/health/readiness", null).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void browserLoginStartsAtKeycloakWithPkce() throws Exception {
+        HttpResponse<String> response = send("GET", "/oauth2/authorization/keycloak", null);
+
+        assertThat(response.statusCode()).isEqualTo(302);
+        assertThat(response.headers().firstValue("Location")).hasValueSatisfying(location -> assertThat(location)
+                .startsWith("http://localhost:8180/realms/event-platform/protocol/openid-connect/auth?")
+                .contains("client_id=event-platform-bff", "code_challenge_method=S256", "code_challenge=",
+                        "scope=openid"));
+    }
+
+    @Test
+    void signedInUserEndpointNeedsASessionLogin() throws Exception {
+        HttpResponse<String> anonymous = send("GET", "/bff/me", null);
+
+        assertThat(anonymous.statusCode()).isEqualTo(401);
+        assertThat(anonymous.body()).contains("\"code\":\"UNAUTHENTICATED\"");
+        // A bearer-token caller is authenticated but has no browser session.
+        assertThat(send("GET", "/bff/me", TestTokens.valid()).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void writeWithTheSessionCookieNeedsTheCsrfToken() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/registrations"))
+                .header("Content-Type", "application/json")
+                .header("Cookie", "SESSION=forged")
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("\"code\":\"ACCESS_DENIED\"");
+        assertThat(BACKEND.requests()).isZero();
     }
 
     private HttpResponse<String> send(String method, String path, String token) throws Exception {

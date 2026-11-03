@@ -12,6 +12,7 @@ import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledExc
 import com.kmg.eventplatform.registration.domain.RegistrationRuleException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -89,6 +90,17 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         body.setProperty("code", "VALIDATION_FAILED");
         body.setProperty("errors", errors);
         return handleExceptionInternal(invalid, body, headers, status, request);
+    }
+
+    /** A query or path parameter that does not convert to its type (unknown status, malformed id). */
+    @Override
+    protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException mismatch, HttpHeaders headers,
+                                                        HttpStatusCode status, WebRequest request) {
+        // For a request parameter (MethodArgumentTypeMismatchException), the property name is the parameter name.
+        ProblemDetail body = problem(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "One or more fields are invalid");
+        body.setTitle("Validation failed");
+        body.setProperty("errors", Map.of(String.valueOf(mismatch.getPropertyName()), "Invalid value"));
+        return handleExceptionInternal(mismatch, body, headers, status, request);
     }
 
     private static ProblemDetail problem(HttpStatus status, String code, String detail) {

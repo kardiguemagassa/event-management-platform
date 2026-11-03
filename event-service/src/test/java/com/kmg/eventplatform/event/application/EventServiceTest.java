@@ -3,6 +3,7 @@ package com.kmg.eventplatform.event.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -20,17 +21,20 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -120,37 +124,35 @@ class EventServiceTest {
         private final Page<Event> page = new PageImpl<>(List.of());
 
         @Test
-        void anonymousCallerSeesNoDraft() {
-            when(repository.findByStatusNot(EventStatus.DRAFT, pageable)).thenReturn(page);
+        void delegatesTheComposedCriteriaWithThePageable() {
+            when(repository.findAll(ArgumentMatchers.<Specification<Event>>any(), eq(pageable))).thenReturn(page);
 
-            assertThat(service.list(null, null, pageable)).isSameAs(page);
+            assertThat(service.list(EventSearch.all(), null, pageable)).isSameAs(page);
         }
 
         @Test
-        void authenticatedCallerAlsoSeesOwnDrafts() {
-            when(repository.findVisibleTo(ORGANIZER, EventStatus.DRAFT, pageable)).thenReturn(page);
+        void composesEveryFilter() {
+            EventSearch search = new EventSearch(EventStatus.PUBLISHED, "paris", NOW, EventSearch.Scope.MINE,
+                    Set.of(UUID.randomUUID()));
+            when(repository.findAll(ArgumentMatchers.<Specification<Event>>any(), eq(pageable))).thenReturn(page);
 
-            assertThat(service.list(null, ORGANIZER, pageable)).isSameAs(page);
+            assertThat(service.list(search, ORGANIZER, pageable)).isSameAs(page);
         }
 
         @Test
-        void draftFilterReturnsOwnDraftsOnly() {
-            when(repository.findByStatusAndOrganizerId(EventStatus.DRAFT, ORGANIZER, pageable)).thenReturn(page);
+        void everyEventForAnAdministrator() {
+            EventSearch everything = new EventSearch(null, null, null, EventSearch.Scope.ALL, null);
+            when(repository.findAll(ArgumentMatchers.<Specification<Event>>any(), eq(pageable))).thenReturn(page);
 
-            assertThat(service.list(EventStatus.DRAFT, ORGANIZER, pageable)).isSameAs(page);
+            assertThat(service.list(everything, UUID.randomUUID(), pageable)).isSameAs(page);
         }
 
         @Test
-        void draftFilterIsEmptyForAnonymousCallers() {
-            assertThat(service.list(EventStatus.DRAFT, null, pageable)).isEmpty();
+        void ownEventsRequireAViewer() {
+            EventSearch mine = new EventSearch(null, null, null, EventSearch.Scope.MINE, null);
+
+            assertThatThrownBy(() -> service.list(mine, null, pageable)).isInstanceOf(NullPointerException.class);
             verifyNoInteractions(repository);
-        }
-
-        @Test
-        void publicStatusFilterIsTheSameForEveryone() {
-            when(repository.findByStatus(EventStatus.PUBLISHED, pageable)).thenReturn(page);
-
-            assertThat(service.list(EventStatus.PUBLISHED, null, pageable)).isSameAs(page);
         }
     }
 
@@ -183,6 +185,37 @@ class EventServiceTest {
 
             assertThatThrownBy(() -> service.update(legacy.getId(), DETAILS, ORGANIZER))
                     .isInstanceOf(NotEventOrganizerException.class);
+        }
+    }
+
+    @Nested
+    class Moderation {
+
+        private final UUID administrator = UUID.randomUUID();
+
+        @Test
+        void administratorCancelsTheEventOfAnyOrganizer() {
+            Event event = existingPublished();
+
+            assertThat(service.cancelAsAdministrator(event.getId(), administrator).getStatus())
+                    .isEqualTo(EventStatus.CANCELLED);
+        }
+
+        @Test
+        void administratorCancelsADraftOfAnotherOrganizer() {
+            Event draft = existing();
+
+            assertThat(service.cancelAsAdministrator(draft.getId(), administrator).getStatus())
+                    .isEqualTo(EventStatus.CANCELLED);
+        }
+
+        @Test
+        void unknownEventIsNotFound() {
+            UUID id = UUID.randomUUID();
+            when(repository.findById(id)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.cancelAsAdministrator(id, administrator))
+                    .isInstanceOf(EventNotFoundException.class);
         }
     }
 
@@ -239,7 +272,7 @@ class EventServiceTest {
 
             assertThatThrownBy(() -> service.delete(event.getId(), ORGANIZER))
                     .isInstanceOf(EventHasReservationsException.class);
-            verify(repository, never()).delete(any());
+            verify(repository, never()).delete(any(Event.class));
         }
 
         @Test
@@ -248,7 +281,7 @@ class EventServiceTest {
 
             assertThatThrownBy(() -> service.delete(event.getId(), OTHER_ORGANIZER))
                     .isInstanceOf(NotEventOrganizerException.class);
-            verify(repository, never()).delete(any());
+            verify(repository, never()).delete(any(Event.class));
         }
 
         @Test
@@ -257,7 +290,7 @@ class EventServiceTest {
             when(repository.findById(id)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.delete(id, ORGANIZER)).isInstanceOf(EventNotFoundException.class);
-            verify(repository, never()).delete(any());
+            verify(repository, never()).delete(any(Event.class));
         }
     }
 }

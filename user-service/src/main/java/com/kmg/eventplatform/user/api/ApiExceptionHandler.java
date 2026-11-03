@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -58,6 +59,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(InvalidQueryParameterException.class)
+    ProblemDetail handleInvalidQueryParameter(InvalidQueryParameterException ex) {
+        return validationFailed(Map.of(ex.getParameter(), ex.getMessage()));
+    }
+
     /** Last resort: log the details, never leak them to the client. */
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception ex) {
@@ -73,12 +79,23 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         ex.getBindingResult().getFieldErrors()
                 .forEach(error -> errors.putIfAbsent(error.getField(), error.getDefaultMessage()));
 
-        ProblemDetail problem = ex.getBody();
-        problem.setTitle("Validation failed");
-        problem.setDetail("One or more fields are invalid");
-        problem.setProperty("code", "VALIDATION_FAILED");
-        problem.setProperty("errors", errors);
+        return handleExceptionInternal(ex, validationFailed(errors), headers, status, request);
+    }
+
+    /** A query or path parameter that does not convert to its type (malformed id). */
+    @Override
+    protected ResponseEntity<Object> handleTypeMismatch(
+            TypeMismatchException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        // For a request parameter (MethodArgumentTypeMismatchException), the property name is the parameter name.
+        ProblemDetail problem = validationFailed(Map.of(String.valueOf(ex.getPropertyName()), "Invalid value"));
         return handleExceptionInternal(ex, problem, headers, status, request);
+    }
+
+    private static ProblemDetail validationFailed(Map<String, String> errors) {
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "Validation failed", "One or more fields are invalid",
+                "VALIDATION_FAILED");
+        problem.setProperty("errors", errors);
+        return problem;
     }
 
     private static ProblemDetail problem(HttpStatus status, String title, String detail, String code) {

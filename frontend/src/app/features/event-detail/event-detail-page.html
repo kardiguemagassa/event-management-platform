@@ -1,0 +1,151 @@
+<a class="back" routerLink="/">
+  <mat-icon svgIcon="back" aria-hidden="true" />
+  Retour au catalogue
+</a>
+
+@if (event.isLoading() && !event.hasValue()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Chargement de l'événement" />
+}
+
+@if (loadError(); as problem) {
+  <div class="state" role="alert">
+    @if (problem.code === 'EVENT_NOT_FOUND') {
+      <h1>Événement introuvable</h1>
+      <p>Il a peut-être été supprimé, ou le lien est incorrect.</p>
+      <a mat-stroked-button routerLink="/">Voir les événements à venir</a>
+    } @else {
+      <p>{{ problem.message }}</p>
+      <button mat-stroked-button type="button" (click)="event.reload()">Réessayer</button>
+    }
+  </div>
+} @else if (event.value(); as e) {
+  <div class="layout">
+    <article class="content">
+      @switch (stage()) {
+        @case ('cancelled') {
+          <p class="banner danger" role="status">Cet événement est annulé.</p>
+        }
+        @case ('draft') {
+          <p class="banner info" role="status">
+            Brouillon : visible par toi seul tant qu'il n'est pas publié.
+          </p>
+        }
+        @case ('past') {
+          <p class="banner info" role="status">Cet événement est terminé.</p>
+        }
+      }
+
+      <h1>{{ e.title }}</h1>
+      <ul class="facts">
+        <li>
+          <mat-icon svgIcon="calendar" aria-hidden="true" />
+          <time [attr.datetime]="e.startAt">{{ e.startAt | date: 'EEEE d MMMM y · HH:mm' }}</time>
+        </li>
+        <li>
+          <mat-icon svgIcon="place" aria-hidden="true" />
+          {{ e.location }}
+        </li>
+      </ul>
+
+      <h2>À propos</h2>
+      @if (e.description) {
+        <p class="description">{{ e.description }}</p>
+      } @else {
+        <p class="description muted">L'organisateur n'a pas encore ajouté de description.</p>
+      }
+    </article>
+
+    <aside class="panel" aria-label="Inscription">
+      @if (seats(); as s) {
+        <p class="seats">
+          <strong>{{ seatsLabel() }}</strong>
+          @if (s.left > 0) {
+            <span> sur {{ e.capacity }}</span>
+          }
+        </p>
+        <div
+          class="gauge"
+          role="meter"
+          aria-label="Places réservées"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          [attr.aria-valuenow]="s.booked"
+        >
+          <span [class]="s.tone" [style.width.%]="s.booked"></span>
+        </div>
+      }
+
+      <div class="feedback" aria-live="polite">
+        @if (notice(); as message) {
+          <p class="banner success" role="status">{{ message }}</p>
+        }
+        @if (failure(); as message) {
+          <p class="banner danger" role="alert">{{ message }}</p>
+        }
+      </div>
+
+      <div class="actions">
+        @switch (stage()) {
+          @case ('open') {
+            @if (session.authenticated()) {
+              <button
+                mat-flat-button
+                type="button"
+                (click)="register()"
+                [disabled]="busy() || registration.isLoading()"
+              >
+                S'inscrire
+              </button>
+            } @else {
+              <button mat-flat-button type="button" (click)="login()">
+                Se connecter pour s'inscrire
+              </button>
+            }
+          }
+          @case ('full') {
+            <button mat-flat-button type="button" disabled>Complet</button>
+          }
+          @case ('registered') {
+            <p class="banner success">
+              <mat-icon svgIcon="registrations" aria-hidden="true" />
+              Tu es inscrit à cet événement.
+            </p>
+            @if (confirmingCancel()) {
+              <p class="confirm" id="cancel-question">
+                Annuler ton inscription et libérer ta place ?
+              </p>
+              <div class="confirm-buttons" role="group" aria-labelledby="cancel-question">
+                <button
+                  mat-flat-button
+                  class="danger"
+                  type="button"
+                  (click)="cancelRegistration()"
+                  [disabled]="busy()"
+                >
+                  Oui, annuler
+                </button>
+                <button
+                  mat-stroked-button
+                  type="button"
+                  (click)="confirmingCancel.set(false)"
+                  [disabled]="busy()"
+                >
+                  Non, garder ma place
+                </button>
+              </div>
+            } @else {
+              <button
+                mat-stroked-button
+                class="danger"
+                type="button"
+                (click)="confirmingCancel.set(true)"
+              >
+                Annuler mon inscription
+              </button>
+            }
+          }
+        }
+      </div>
+    </aside>
+  </div>
+}

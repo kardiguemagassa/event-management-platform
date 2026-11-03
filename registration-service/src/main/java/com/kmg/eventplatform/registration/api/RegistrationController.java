@@ -2,6 +2,7 @@ package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.RegistrationService;
 import com.kmg.eventplatform.registration.domain.Registration;
+import com.kmg.eventplatform.registration.domain.RegistrationStatus;
 import com.kmg.eventplatform.registration.infrastructure.openapi.OpenApiResponses;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -13,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.net.URI;
@@ -61,13 +64,20 @@ class RegistrationController {
     }
 
     @GetMapping("/me")
-    @Operation(summary = "List the caller's registrations")
+    @Operation(summary = "List the caller's registrations",
+            description = "Optionally for one event and in one status: eventId with CONFIRMED tells whether the "
+                    + "caller is registered to that event.")
     @ApiResponse(responseCode = "200", description = "Page of registrations, newest first by default")
     @ApiResponse(responseCode = "400", ref = OpenApiResponses.BAD_REQUEST)
     PageResponse<RegistrationResponse> mine(
+            @Parameter(description = "Only the registrations to this event")
+            @RequestParam(required = false) UUID eventId,
+            @Parameter(description = "Only registrations in this status")
+            @RequestParam(required = false) RegistrationStatus status,
             @ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
             @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
-        return PageResponse.from(service.findByUser(userId(caller), checkSort(pageable)).map(RegistrationResponse::from));
+        return PageResponse.from(service.findByUser(userId(caller), eventId, status, checkSort(pageable))
+                .map(RegistrationResponse::from));
     }
 
     @GetMapping("/{id}")
@@ -90,18 +100,31 @@ class RegistrationController {
     }
 
     @GetMapping("/events/{eventId}")
-    @Operation(summary = "List the registrations of an event", description = "Its organizer only.")
+    @Operation(summary = "List the registrations of an event",
+            description = "Its organizer, or an administrator (audited). Each registration carries the attendee's "
+                    + "display name (null when unknown: no profile, or names temporarily unavailable).")
     @ApiResponse(responseCode = "200", description = "Page of registrations, newest first by default")
     @ApiResponse(responseCode = "400", ref = OpenApiResponses.BAD_REQUEST)
     @ApiResponse(responseCode = "403", ref = OpenApiResponses.FORBIDDEN)
     @ApiResponse(responseCode = "404", ref = OpenApiResponses.NOT_FOUND)
     @ApiResponse(responseCode = "503", ref = OpenApiResponses.SERVICE_UNAVAILABLE)
-    PageResponse<RegistrationResponse> findByEvent(
+    PageResponse<EventRegistrationResponse> findByEvent(
             @PathVariable UUID eventId,
+            @Parameter(description = "Only registrations in this status")
+            @RequestParam(required = false) RegistrationStatus status,
             @ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
-            @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
-        return PageResponse.from(service.findByEvent(eventId, userId(caller), checkSort(pageable))
-                .map(RegistrationResponse::from));
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller,
+            @Parameter(hidden = true) Authentication authentication) {
+        Pageable checked = checkSort(pageable);
+        var registrations = isAdministrator(authentication)
+                ? service.findByEventAsAdministrator(eventId, status, userId(caller), checked)
+                : service.findByEvent(eventId, status, userId(caller), checked);
+        return PageResponse.from(registrations.map(EventRegistrationResponse::from));
+    }
+
+    private static boolean isAdministrator(Authentication authentication) {
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
     }
 
     /** Keycloak user id of the caller: every route of this controller requires a token. */

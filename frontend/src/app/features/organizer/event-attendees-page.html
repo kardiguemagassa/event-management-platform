@@ -1,0 +1,97 @@
+<a class="back" [routerLink]="back().link">‹ {{ back().label }}</a>
+
+<header class="page-header">
+  <h1>Inscrits</h1>
+  @if (event(); as e) {
+    <p class="subtitle">
+      <strong>{{ e.title }}</strong> ·
+      <time [attr.datetime]="e.startAt">{{ e.startAt | date: 'dd/MM/y · HH:mm' }}</time> ·
+      {{ e.reservedSeats }} / {{ e.capacity }} places réservées
+    </p>
+  }
+</header>
+
+<mat-button-toggle-group
+  class="filters"
+  aria-label="Statut des inscriptions"
+  [value]="filter()"
+  (change)="chooseFilter($event)"
+  hideSingleSelectionIndicator
+>
+  <mat-button-toggle value="confirmees">Confirmées</mat-button-toggle>
+  <mat-button-toggle value="annulees">Annulées</mat-button-toggle>
+  <mat-button-toggle value="toutes">Toutes</mat-button-toggle>
+</mat-button-toggle-group>
+
+@if (attendees.isLoading()) {
+  <mat-progress-bar mode="indeterminate" aria-label="Chargement des inscrits" />
+}
+
+@if (loadError(); as message) {
+  <div class="state" role="alert">
+    <p>{{ message }}</p>
+    <button mat-stroked-button type="button" (click)="retry()">Réessayer</button>
+  </div>
+} @else if (result(); as page) {
+  @if (page.content?.length) {
+    <p class="count" aria-live="polite">
+      {{ page.totalElements }} inscription{{ page.totalElements === 1 ? '' : 's' }}
+    </p>
+    <table class="attendees">
+      <caption class="visually-hidden">
+        Inscriptions à l'événement
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Nom</th>
+          <th scope="col">Inscrit le</th>
+          <th scope="col">Statut</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (registration of page.content; track registration.id) {
+          <tr>
+            <td class="name">
+              @if (registration.attendeeName; as name) {
+                {{ name }}
+              } @else {
+                <span class="unknown">Nom indisponible</span>
+              }
+            </td>
+            <td>
+              <time [attr.datetime]="registration.createdAt">{{
+                registration.createdAt | date: 'dd/MM/y · HH:mm'
+              }}</time>
+            </td>
+            <td>
+              @if (registration.status === 'CANCELLED') {
+                <span class="badge CANCELLED">Annulée</span>
+                @if (registration.cancelledAt) {
+                  &ngsp;<span class="when"
+                    >le {{ registration.cancelledAt | date: 'dd/MM/y' }}</span
+                  >
+                }
+              } @else {
+                <span class="badge CONFIRMED">Confirmée</span>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    @if (page.totalPages && page.totalPages > 1) {
+      <mat-paginator
+        [length]="page.totalElements"
+        [pageSize]="pageSize"
+        [pageIndex]="page.page"
+        [hidePageSize]="true"
+        (page)="changePage($event)"
+        aria-label="Pages des inscriptions"
+      />
+    }
+  } @else {
+    <div class="state">
+      <p>{{ emptyMessage() }}</p>
+    </div>
+  }
+}

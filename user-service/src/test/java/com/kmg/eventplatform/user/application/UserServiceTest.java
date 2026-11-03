@@ -3,6 +3,7 @@ package com.kmg.eventplatform.user.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,11 +17,13 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -29,6 +32,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
@@ -148,12 +152,21 @@ class UserServiceTest {
     }
 
     @Test
-    void listDelegatesPagination() {
+    void findAllByIdDelegatesToTheRepository() {
+        User ada = User.register(ADA, "Ada Lovelace", "ada@example.com", NOW);
+        when(repository.findAllById(Set.of(ADA))).thenReturn(List.of(ada));
+
+        assertThat(service.findAllById(Set.of(ADA))).containsExactly(ada);
+    }
+
+    @Test
+    void listDelegatesTheFiltersAndThePagination() {
         Pageable pageable = PageRequest.of(0, 20);
         Page<User> page = new PageImpl<>(List.of());
-        when(repository.findAll(pageable)).thenReturn(page);
+        when(repository.findAll(ArgumentMatchers.<Specification<User>>any(), eq(pageable))).thenReturn(page);
 
-        assertThat(service.list(pageable)).isSameAs(page);
+        assertThat(service.list(null, null, pageable)).isSameAs(page);
+        assertThat(service.list("  ada ", Set.of(ADA), pageable)).isSameAs(page);
     }
 
     @Nested
@@ -169,11 +182,20 @@ class UserServiceTest {
         }
 
         @Test
+        void administratorDeletesTheProfileOfAnotherUser() {
+            User ada = existingAda();
+
+            service.deleteAsAdministrator(ADA, UUID.randomUUID());
+
+            verify(repository).delete(ada);
+        }
+
+        @Test
         void throwsWhenProfileDoesNotExistAndDeletesNothing() {
             when(repository.findById(ADA)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.delete(ADA)).isInstanceOf(UserNotFoundException.class);
-            verify(repository, never()).delete(any());
+            verify(repository, never()).delete(any(User.class));
         }
     }
 }

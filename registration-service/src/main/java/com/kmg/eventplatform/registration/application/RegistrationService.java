@@ -10,10 +10,20 @@ import org.springframework.core.NestedExceptionUtils;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+
+import static com.kmg.eventplatform.registration.domain.RegistrationSpecifications.forEvent;
+import static com.kmg.eventplatform.registration.domain.RegistrationSpecifications.hasStatus;
+import static com.kmg.eventplatform.registration.domain.RegistrationSpecifications.ofUser;
 
 /**
  * Registers the authenticated user to an event of event-service. The attendee is the caller identified by
@@ -34,13 +44,15 @@ public class RegistrationService {
     private final EventCatalog events;
     private final Clock clock;
     private final RegistrationMetrics metrics;
+    private final AttendeeDirectory attendeeDirectory;
 
     public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock,
-                               RegistrationMetrics metrics) {
+                               RegistrationMetrics metrics, AttendeeDirectory attendeeDirectory) {
         this.repository = repository;
         this.events = events;
         this.clock = clock;
         this.metrics = metrics;
+        this.attendeeDirectory = attendeeDirectory;
     }
 
     /**
@@ -115,17 +127,68 @@ public class RegistrationService {
                 .orElseThrow(() -> new RegistrationNotFoundException(registrationId));
     }
 
-    /** Who registered to an event: its organizer only (the event itself is public, hence 403 rather than 404). */
-    public Page<Registration> findByEvent(UUID eventId, UUID organizerId, Pageable pageable) {
+    /**
+     * Who registered to an event, with their display names: its organizer only (the event itself is public,
+     * hence 403 rather than 404). One call to user-service per page; without it, the list is still served
+     * with unknown names.
+     *
+     * @param status optional filter, {@code null} for every registration
+     */
+    public Page<EventRegistration> findByEvent(UUID eventId, RegistrationStatus status, UUID organizerId,
+                                               Pageable pageable) {
         boolean organizer = events.organizerOf(eventId).map(organizerId::equals).orElse(false);
         if (!organizer) {
             throw new NotEventOrganizerException(eventId);
         }
-        return repository.findByEventId(eventId, pageable);
+        return registrationsOf(eventId, status, pageable);
     }
 
-    public Page<Registration> findByUser(UUID userId, Pageable pageable) {
-        return repository.findByUserId(userId, pageable);
+    /**
+     * Moderation: an administrator reads who registered to any event. Audited, since it discloses the names of
+     * attendees to someone other than the organizer.
+     */
+    public Page<EventRegistration> findByEventAsAdministrator(UUID eventId, RegistrationStatus status,
+                                                             UUID administratorId, Pageable pageable) {
+        log.info("Audit: administrator {} read the registrations of event {}", administratorId, eventId);
+        return registrationsOf(eventId, status, pageable);
+    }
+
+    private Page<EventRegistration> registrationsOf(UUID eventId, RegistrationStatus status, Pageable pageable) {
+        Page<Registration> page = status == null
+                ? repository.findByEventId(eventId, pageable)
+                : repository.findByEventIdAndStatus(eventId, status, pageable);
+        Map<UUID, String> names = attendeeNames(page);
+        return page.map(registration -> new EventRegistration(registration, names.get(registration.getUserId())));
+    }
+
+    /**
+     * The caller's registrations, optionally for one event and in one status: "am I registered to this event?" is
+     * {@code eventId} with {@code CONFIRMED}.
+     */
+    public Page<Registration> findByUser(UUID userId, UUID eventId, RegistrationStatus status, Pageable pageable) {
+        List<Specification<Registration>> criteria = new ArrayList<>();
+        criteria.add(ofUser(userId));
+        if (eventId != null) {
+            criteria.add(forEvent(eventId));
+        }
+        if (status != null) {
+            criteria.add(hasStatus(status));
+        }
+        return repository.findAll(Specification.allOf(criteria), pageable);
+    }
+
+    private Map<UUID, String> attendeeNames(Page<Registration> page) {
+        Set<UUID> attendees = page.stream().map(Registration::getUserId).collect(Collectors.toSet());
+        if (attendees.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return attendeeDirectory.namesOf(attendees);
+        } catch (RuntimeException unavailable) {
+            // Names only enrich the list: an outage (or a refused call, a missing role for instance) never fails it.
+            log.warn("Attendee names unavailable, listing without them: {}", unavailable.toString());
+            return Map.of();
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -16,6 +17,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.sql.SQLException;
 import java.time.Clock;
@@ -28,6 +30,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,6 +47,7 @@ class RegistrationServiceTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID organizerId = UUID.randomUUID();
     private final FakeEventCatalog events = new FakeEventCatalog();
+    private final FakeAttendeeDirectory attendees = new FakeAttendeeDirectory();
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private RegistrationService service;
 
@@ -52,7 +56,7 @@ class RegistrationServiceTest {
         events.events.add(eventId);
         events.organizers.put(eventId, organizerId);
         service = new RegistrationService(repository, events, Clock.fixed(NOW, ZoneOffset.UTC),
-                new RegistrationMetrics(meters));
+                new RegistrationMetrics(meters), attendees);
     }
 
     @Test
@@ -222,27 +226,72 @@ class RegistrationServiceTest {
     }
 
     @Test
-    void organizerListsTheRegistrationsOfTheirEvent() {
+    void organizerListsTheRegistrationsOfTheirEventWithTheAttendeeNames() {
         Pageable pageable = PageRequest.of(0, 20);
-        Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
-        when(repository.findByEventId(eventId, pageable)).thenReturn(page);
+        Registration withProfile = confirmedRegistration();
+        Registration withoutProfile = Registration.confirm(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW);
+        attendees.names.put(userId, "Ada Lovelace");
+        when(repository.findByEventId(eventId, pageable))
+                .thenReturn(new PageImpl<>(List.of(withProfile, withoutProfile), pageable, 2));
 
-        assertThat(service.findByEvent(eventId, organizerId, pageable)).isSameAs(page);
+        Page<EventRegistration> page = service.findByEvent(eventId, null, organizerId, pageable);
+
+        assertThat(page.getContent()).containsExactly(
+                new EventRegistration(withProfile, "Ada Lovelace"),
+                new EventRegistration(withoutProfile, null));
+        assertThat(page.getTotalElements()).isEqualTo(2);
+        assertThat(attendees.calls).as("one call per page").isEqualTo(1);
+    }
+
+    @Test
+    void organizerFiltersTheRegistrationsByStatus() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CANCELLED, pageable))
+                .thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        assertThat(service.findByEvent(eventId, RegistrationStatus.CANCELLED, organizerId, pageable)).isEmpty();
+        assertThat(attendees.calls).as("no attendee, no call").isZero();
+    }
+
+    @Test
+    void registrationsAreListedWithoutNamesWhenUserServiceFails() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Registration registration = confirmedRegistration();
+        attendees.failure = new DownstreamUnavailableException("user-service", "circuit breaker is open");
+        when(repository.findByEventId(eventId, pageable)).thenReturn(new PageImpl<>(List.of(registration), pageable, 1));
+
+        assertThat(service.findByEvent(eventId, null, organizerId, pageable).getContent())
+                .containsExactly(new EventRegistration(registration, null));
     }
 
     @Test
     void otherUsersCannotListTheRegistrationsOfAnEvent() {
-        assertThatThrownBy(() -> service.findByEvent(eventId, userId, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> service.findByEvent(eventId, null, userId, PageRequest.of(0, 20)))
                 .isInstanceOf(NotEventOrganizerException.class)
                 .hasMessageContaining(eventId.toString());
         verify(repository, never()).findByEventId(any(), any());
+        assertThat(attendees.calls).isZero();
+    }
+
+    @Test
+    void administratorListsTheRegistrationsOfAnyEventWithTheAttendeeNames() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Registration registration = confirmedRegistration();
+        attendees.names.put(userId, "Ada Lovelace");
+        when(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CONFIRMED, pageable))
+                .thenReturn(new PageImpl<>(List.of(registration), pageable, 1));
+
+        Page<EventRegistration> page = service.findByEventAsAdministrator(
+                eventId, RegistrationStatus.CONFIRMED, UUID.randomUUID(), pageable);
+
+        assertThat(page.getContent()).containsExactly(new EventRegistration(registration, "Ada Lovelace"));
     }
 
     @Test
     void registrationsOfAnEventCreatedBeforeOwnershipAreListedByNobody() {
         events.organizers.remove(eventId);
 
-        assertThatThrownBy(() -> service.findByEvent(eventId, organizerId, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> service.findByEvent(eventId, null, organizerId, PageRequest.of(0, 20)))
                 .isInstanceOf(NotEventOrganizerException.class);
     }
 
@@ -250,9 +299,18 @@ class RegistrationServiceTest {
     void attendeeListsOwnRegistrations() {
         Pageable pageable = PageRequest.of(0, 20);
         Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
-        when(repository.findByUserId(userId, pageable)).thenReturn(page);
+        when(repository.findAll(ArgumentMatchers.<Specification<Registration>>any(), eq(pageable))).thenReturn(page);
 
-        assertThat(service.findByUser(userId, pageable)).isSameAs(page);
+        assertThat(service.findByUser(userId, null, null, pageable)).isSameAs(page);
+    }
+
+    @Test
+    void attendeeChecksTheirRegistrationToOneEvent() {
+        Pageable pageable = PageRequest.of(0, 1);
+        Page<Registration> page = new PageImpl<>(List.of(confirmedRegistration()));
+        when(repository.findAll(ArgumentMatchers.<Specification<Registration>>any(), eq(pageable))).thenReturn(page);
+
+        assertThat(service.findByUser(userId, eventId, RegistrationStatus.CONFIRMED, pageable)).isSameAs(page);
     }
 
     private Registration confirmedRegistration() {

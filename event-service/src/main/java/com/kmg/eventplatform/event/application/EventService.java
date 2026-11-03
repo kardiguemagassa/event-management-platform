@@ -1,13 +1,25 @@
 package com.kmg.eventplatform.event.application;
 
+import static com.kmg.eventplatform.event.domain.EventSpecifications.hasStatus;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.idIn;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.organizedBy;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.startsAtOrAfter;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.titleOrLocationContains;
+import static com.kmg.eventplatform.event.domain.EventSpecifications.visibleTo;
+
 import com.kmg.eventplatform.event.domain.Event;
 import com.kmg.eventplatform.event.domain.EventDetails;
 import com.kmg.eventplatform.event.domain.EventRepository;
-import com.kmg.eventplatform.event.domain.EventStatus;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional(readOnly = true)
 public class EventService {
+
+    private static final Logger log = LoggerFactory.getLogger(EventService.class);
 
     private final EventRepository repository;
     private final Clock clock;
@@ -49,23 +63,34 @@ public class EventService {
     }
 
     /**
-     * Events visible to the viewer: every published or cancelled event, plus the viewer's own drafts.
+     * Events matching the search, within its {@link EventSearch.Scope scope}. The scope is authorized by the caller's
+     * role before this call: {@code MINE} for organizers, {@code ALL} for administrators.
      *
-     * @param status   optional filter, {@code null} for all visible events
-     * @param viewerId the caller, {@code null} when anonymous
+     * @param viewerId the caller, {@code null} when anonymous (never with {@code MINE})
      */
-    public Page<Event> list(EventStatus status, UUID viewerId, Pageable pageable) {
-        if (status == null) {
-            return viewerId == null
-                    ? repository.findByStatusNot(EventStatus.DRAFT, pageable)
-                    : repository.findVisibleTo(viewerId, EventStatus.DRAFT, pageable);
+    public Page<Event> list(EventSearch search, UUID viewerId, Pageable pageable) {
+        List<Specification<Event>> criteria = new ArrayList<>();
+        switch (search.scope()) {
+            case VISIBLE -> criteria.add(visibleTo(viewerId));
+            case MINE -> criteria.add(
+                    organizedBy(Objects.requireNonNull(viewerId, "MINE requires an authenticated caller")));
+            case ALL -> {
+                // Every event: no criterion.
+            }
         }
-        if (status == EventStatus.DRAFT) {
-            return viewerId == null
-                    ? Page.empty(pageable)
-                    : repository.findByStatusAndOrganizerId(EventStatus.DRAFT, viewerId, pageable);
+        if (search.status() != null) {
+            criteria.add(hasStatus(search.status()));
         }
-        return repository.findByStatus(status, pageable);
+        if (search.text() != null) {
+            criteria.add(titleOrLocationContains(search.text()));
+        }
+        if (search.from() != null) {
+            criteria.add(startsAtOrAfter(search.from()));
+        }
+        if (search.ids() != null) {
+            criteria.add(idIn(search.ids()));
+        }
+        return repository.findAll(Specification.allOf(criteria), pageable);
     }
 
     @Transactional
@@ -86,6 +111,21 @@ public class EventService {
     public Event cancel(UUID id, UUID organizerId) {
         Event event = getOwned(id, organizerId);
         event.cancel();
+        return event;
+    }
+
+    /**
+     * Moderation: an administrator cancels any event, whoever organizes it. Audited, since it acts on the work of
+     * another user.
+     */
+    @Transactional
+    public Event cancelAsAdministrator(UUID id, UUID administratorId) {
+        Event event = getById(id);
+        event.cancel();
+        if (!event.isOrganizedBy(administratorId)) {
+            log.info("Audit: administrator {} cancelled event {} of organizer {}",
+                    administratorId, id, event.getOrganizerId());
+        }
         return event;
     }
 

@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,7 +30,10 @@ import com.kmg.eventplatform.user.domain.User;
 import com.kmg.eventplatform.user.infrastructure.security.SecurityConfig;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,6 +83,61 @@ class UserControllerTest {
     private static JwtRequestPostProcessor asAdmin() {
         return jwt().jwt(token -> token.subject(UUID.randomUUID().toString()))
                 .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+    }
+
+    private static JwtRequestPostProcessor asProfileReader() {
+        return jwt().jwt(token -> token.subject(UUID.randomUUID().toString()))
+                .authorities(new SimpleGrantedAuthority("ROLE_PROFILE_READER"));
+    }
+
+    @Test
+    void profileReaderGetsDisplayNamesOnly() throws Exception {
+        UUID unknown = UUID.randomUUID();
+        when(service.findAllById(Set.of(ADA_ID, unknown))).thenReturn(List.of(ada()));
+
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()).param("ids", ADA_ID + "," + unknown + "," + ADA_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(ADA_ID.toString()))
+                .andExpect(jsonPath("$[0].fullName").value("Ada Lovelace"))
+                .andExpect(jsonPath("$[0].email").doesNotExist());
+    }
+
+    @Test
+    void namesWithoutIdsAreAnEmptyList() throws Exception {
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void namesAreForTheProfileReaderRoleOnly() throws Exception {
+        mockMvc.perform(get("/api/users/names").with(asAda()).param("ids", ADA_ID.toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get("/api/users/names").with(asAdmin()).param("ids", ADA_ID.toString()))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void namesRejectMalformedOrTooManyIds() throws Exception {
+        String tooMany = IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID().toString())
+                .collect(Collectors.joining(","));
+
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()).param("ids", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.ids").exists());
+        mockMvc.perform(get("/api/users/names").with(asProfileReader()).param("ids", tooMany))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors.ids").exists());
+
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -255,8 +314,8 @@ class UserControllerTest {
 
     @Test
     void listUsesDefaultPaginationAndStablePageContract() throws Exception {
-        when(service.list(any())).thenAnswer(invocation ->
-                new PageImpl<>(List.of(ada()), invocation.getArgument(0), 1));
+        when(service.list(any(), any(), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(ada()), invocation.getArgument(2), 1));
 
         mockMvc.perform(get("/api/users").with(asAdmin()))
                 .andExpect(status().isOk())
@@ -267,15 +326,43 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.totalPages").value(1));
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(service).list(pageable.capture());
+        verify(service).list(isNull(), eq(Set.of()), pageable.capture());
         assertThat(pageable.getValue().getSort().getOrderFor("createdAt").getDirection())
                 .isEqualTo(Sort.Direction.DESC);
     }
 
     @Test
+    void listPassesTheSearchAndTheIdsToTheService() throws Exception {
+        UUID grace = UUID.randomUUID();
+        when(service.list(any(), any(), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(), invocation.getArgument(2), 0));
+
+        mockMvc.perform(get("/api/users").param("q", "ada").param("ids", ADA_ID + "," + grace + "," + ADA_ID)
+                        .with(asAdmin()))
+                .andExpect(status().isOk());
+
+        verify(service).list(eq("ada"), eq(Set.of(ADA_ID, grace)), any());
+    }
+
+    @Test
+    void listRejectsTooLongASearchOrTooManyIds() throws Exception {
+        String ids = IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID().toString())
+                .collect(Collectors.joining(","));
+
+        mockMvc.perform(get("/api/users").param("q", "x".repeat(101)).with(asAdmin()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(get("/api/users").param("ids", ids).with(asAdmin()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        verify(service, never()).list(any(), any(), any());
+    }
+
+    @Test
     void listCapsPageSizeAt100() throws Exception {
-        when(service.list(any())).thenAnswer(invocation ->
-                new PageImpl<>(List.of(), invocation.getArgument(0), 0));
+        when(service.list(any(), any(), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(), invocation.getArgument(2), 0));
 
         mockMvc.perform(get("/api/users").param("size", "100000").with(asAdmin()))
                 .andExpect(status().isOk())
@@ -289,13 +376,13 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_SORT_PROPERTY"))
                 .andExpect(jsonPath("$.property").value("version"));
 
-        verify(service, never()).list(any());
+        verify(service, never()).list(any(), any(), any());
     }
 
     @Test
     void listAcceptsWhitelistedSort() throws Exception {
-        when(service.list(any())).thenAnswer(invocation ->
-                new PageImpl<>(List.of(), invocation.getArgument(0), 0));
+        when(service.list(any(), any(), any())).thenAnswer(invocation ->
+                new PageImpl<>(List.of(), invocation.getArgument(2), 0));
 
         mockMvc.perform(get("/api/users").param("sort", "fullName,asc").with(asAdmin()))
                 .andExpect(status().isOk());
@@ -306,13 +393,14 @@ class UserControllerTest {
         mockMvc.perform(delete("/api/users/{id}", ADA_ID).with(asAdmin()))
                 .andExpect(status().isNoContent());
 
-        verify(service).delete(ADA_ID);
+        verify(service).deleteAsAdministrator(eq(ADA_ID), any());
+        verify(service, never()).delete(any());
     }
 
     @Test
     void deleteReturns404WhenTheProfileDoesNotExist() throws Exception {
         UUID id = UUID.randomUUID();
-        doThrow(new UserNotFoundException(id)).when(service).delete(id);
+        doThrow(new UserNotFoundException(id)).when(service).deleteAsAdministrator(eq(id), any());
 
         mockMvc.perform(delete("/api/users/{id}", id).with(asAdmin()))
                 .andExpect(status().isNotFound());
