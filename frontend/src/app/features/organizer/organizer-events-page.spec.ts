@@ -25,7 +25,7 @@ const DRAFT: EventResponse = {
   id: 'd1',
   title: 'Atelier observabilité',
   location: 'Paris, Bastille',
-  startAt: '2099-01-21T13:00:00Z',
+  startAt: new Date(2099, 0, 21, 14, 0).toISOString(), // 14:00 in the time zone of the run, CI included
   capacity: 40,
   reservedSeats: 0,
   status: 'DRAFT',
