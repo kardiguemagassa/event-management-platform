@@ -12,6 +12,7 @@ describe('Shell', () => {
     user,
     authenticated: () => user() !== null,
     organizer: () => user()?.roles.includes('ORGANIZER') ?? false,
+    administrator: () => user()?.roles.includes('ADMIN') ?? false,
     login: vi.fn(),
     logout: vi.fn(),
   };
@@ -47,6 +48,13 @@ describe('Shell', () => {
     const view = render();
     const links = [...view.querySelectorAll('.top-nav a')].map((a) => a.getAttribute('href'));
     expect(links).toEqual(['/', '/mes-inscriptions', '/organisation']);
+  });
+
+  it('adds the administration for administrators only', () => {
+    user.set({ subject: 'k', name: 'K', email: null, roles: ['ATTENDEE', 'ADMIN'] });
+    const view = render();
+    const links = [...view.querySelectorAll('.top-nav a')].map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/', '/mes-inscriptions', '/administration']);
   });
 
   it('offers to sign in, back to the current page', async () => {

@@ -32,6 +32,7 @@ export class Session {
   readonly user = this.current.asReadonly();
   readonly authenticated = computed(() => this.current() !== null);
   readonly organizer = computed(() => this.hasRole('ORGANIZER'));
+  readonly administrator = computed(() => this.hasRole('ADMIN'));
 
   /** Run once at startup: 401 means anonymous, any other failure too (the catalogue stays usable). */
   async load(): Promise<void> {
