@@ -21,6 +21,8 @@ GitHub Actions.
 | `keycloak` | Identity provider: sign-up and login, roles, access tokens (realm `event-platform`) |
 | `platform-security` | Shared library (not a service): resource server setup of the servlet services, test token helpers |
 | `platform-observability` | Shared library (not a service): OpenTelemetry tracing without the noise, trace id in error responses |
+| `platform-messaging` | Shared library (not a service): transactional outbox published to Kafka, idempotent consumption, dead letter topics |
+| `kafka` | Message broker of the registration saga (KRaft, one node in development) |
 | `otel-lgtm` | Observability backend for development: OpenTelemetry collector, Tempo (traces), Prometheus (metrics), Loki, Grafana |
 
 ## Architecture
@@ -68,6 +70,7 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Language and framework | Java 21, Spring Boot 4.1, Spring MVC (virtual threads) and Spring WebFlux (gateway) |
 | Microservices | Spring Cloud 2025.1: Gateway, Netflix Eureka, LoadBalancer, CircuitBreaker (Resilience4j) |
 | Persistence | PostgreSQL 18, Spring Data JPA (Hibernate 7), Flyway |
+| Messaging | Apache Kafka 4 (KRaft), Spring for Apache Kafka, transactional outbox (polling publisher) |
 | API | REST, RFC 9457 problem details, OpenAPI 3 (springdoc), Bean Validation |
 | Security | Keycloak 26 (OpenID Connect), Spring Security 7: OAuth2 resource server (JWT, RS256) and OAuth2 client (client credentials) |
 | Observability | OpenTelemetry (Spring Boot starter, Micrometer Tracing), W3C trace context, OTLP; Grafana, Tempo, Prometheus, Loki (`grafana/otel-lgtm`) in development |
@@ -82,6 +85,9 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | One database per service, each on a private network | A service owns its data; no other service can reach its database, not even through the network |
 | Synchronous saga in `registration-service`, with compensation | Event check, seat reservation, then the registration is saved; if saving fails, the seat is released. No distributed transaction, and no HTTP call inside a database transaction |
 | Idempotent seat reservation (reservation id = registration id) | A retried reserve or release never counts twice |
+| Transactional outbox with a polling publisher (`platform-messaging`) | A message is written in the transaction of its business change and published to Kafka afterwards: a crash in between loses nothing. Polling rather than Debezium: no Kafka Connect to run, ~200 ms of latency is enough here |
+| At-least-once delivery, idempotent consumers | The relay marks a message published only once Kafka has acknowledged it; consumers record each message id in the transaction of its effect, so a redelivery is a no-op |
+| Dead letter topic per topic | A message that keeps failing (two retries) or cannot be read leaves its partition instead of blocking it, with the exception in its headers |
 | Partial unique index on (event, user) for confirmed registrations | Duplicates are rejected by the database itself, even under concurrent requests (covered by a concurrency test) |
 | Retry, then circuit breaker, per downstream service | Fast transient failures are retried once; a failing service is cut off and answered with `503` in milliseconds. Business answers (`404`, `409`) are not failures |
 | "No instance available" ignored by the circuit breaker | No request is sent, so there is nothing to protect; counting it made recovery fail while discovery caught up ([#10](https://github.com/kardiguemagassa/event-management-platform/issues/10)) |
@@ -291,7 +297,7 @@ Published ports are bound to `127.0.0.1` only. The services publish no port: the
 ### Option 2: databases in Docker, services from the IDE
 
 ```bash
-docker compose up -d                     # databases (5433, 5434, 5435), Keycloak (8180), otel-lgtm (3000, 4318)
+docker compose up -d                     # databases (5433, 5434, 5435), Keycloak (8180), Kafka (9094), otel-lgtm (3000, 4318)
 ```
 
 Then start `discovery-server` first, followed by the other services. The aggregated Swagger UI works here too
@@ -376,7 +382,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (59 c
 - One multi-stage `Dockerfile` for every module (`--build-arg MODULE=...`): layered jar, Maven cache mount, non-root user.
 - `docker` Spring profile: unique Eureka instance id, service name announced instead of an IP, short discovery
   intervals (development values; production keeps the defaults).
-- One private network per service and its database: a database is reachable by its owner only.
+- One private network per service and its database: a database is reachable by its owner only. Kafka has its own
+  network too, joined by the services of the saga only.
 - Health checks on `/actuator/health/readiness`, used to order the startup.
 - JVM sized for the container: G1 chosen explicitly (the JVM would pick the single-threaded Serial collector below
   2 CPUs or 1792 MB, measured at 6 s pauses), heap at 60 % of the 512 MB limit.
@@ -430,7 +437,7 @@ After a change of the API, with the platform running:
 | Level | Tools | Scope |
 |---|---|---|
 | Unit | JUnit 5, AssertJ, Mockito, Spring Security Test | Domain rules (ownership, visibility), application services, HTTP adapters and access rules, the circuit breaker configuration on a real Resilience4j breaker |
-| Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs |
+| Integration (`*IT`) | Testcontainers (PostgreSQL 18, Kafka), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs; the outbox (order, trace context, rollback, Kafka outage) and dead letter topics |
 | Web application | Vitest, Angular TestBed, `HttpTestingController` | Session (BFF), error mapping, guards, pages and components against a fake HTTP backend; coverage floor 85 % lines, 80 % branches (`npm test` in `frontend`) |
 | End to end | `scripts/e2e-docker.sh` | The whole platform in Docker with a real Keycloak, through the gateway only, including an outage and the recovery of `event-service` |
 | Browser | Playwright, axe-core | The user journeys in Chromium on the platform in Docker, signing in on the real Keycloak pages; WCAG 2.1 A/AA checks on the main pages; a phone layout (`e2e`, see below) |
@@ -443,6 +450,7 @@ coverage can only go up:
 |---|---|---|
 | `platform-security` | 90 % | 80 % |
 | `platform-observability` | 90 % | 80 % |
+| `platform-messaging` | 90 % | 80 % |
 | `api-gateway` | 96 % | 63 % |
 | `user-service` | 98 % | 84 % |
 | `event-service` | 98 % | 84 % |
