@@ -46,6 +46,15 @@ spring:
     web:
       pageable:
         max-page-size: 100
+  # Seat requests of the registration saga (platform-messaging: outbox, idempotent consumption, dead letter topics).
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+    consumer:
+      # A reply written before the first start of the service is handled, not skipped.
+      auto-offset-reset: earliest
+    listener:
+      # Each reply handled continues the trace of the request that wrote it (traceparent header).
+      observation-enabled: true
   cloud:
     circuitbreaker:
       resilience4j:

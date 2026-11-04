@@ -17,7 +17,7 @@ GitHub Actions.
 | `discovery-server` | Eureka registry: services find each other by name |
 | `user-service` | Application profiles of the users (`/api/users/me`), keyed by their Keycloak id |
 | `event-service` | Events, their lifecycle (draft, published, cancelled), their organizer and capacity, with idempotent seat reservation (HTTP, or seat commands from Kafka answered through its outbox) |
-| `registration-service` | Registers the authenticated user to an event, reserving a seat in `event-service` with its own service account |
+| `registration-service` | Registers the authenticated user to an event: the seat is requested from `event-service` through Kafka (saga with a transactional outbox), the registration confirmed or rejected by its answer |
 | `keycloak` | Identity provider: sign-up and login, roles, access tokens (realm `event-platform`) |
 | `platform-security` | Shared library (not a service): resource server setup of the servlet services, test token helpers |
 | `platform-observability` | Shared library (not a service): OpenTelemetry tracing without the noise, trace id in error responses |
@@ -45,7 +45,11 @@ flowchart LR
 
     web -->|"/api, /bff, login<br/>(session cookie)"| gateway
     gateway -->|"token relayed"| users & events & registrations
-    registrations -->|"service account token:<br/>event, organizer, reserve / release seat"| events
+    registrations -->|"service account token:<br/>organizer of an event"| events
+    registrations -->|"ReserveSeat, ReleaseSeat<br/>(outbox)"| kafka[(Kafka)]
+    kafka -->|"seat commands"| events
+    events -->|"SeatReserved, SeatRejected<br/>(outbox)"| kafka
+    kafka -->|"seat replies"| registrations
     registrations -.->|"client credentials"| keycloak
     gateway -.->|"signing keys (JWKS)"| keycloak
     users & events & registrations -.-> keycloak
@@ -83,7 +87,8 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Decision | Why |
 |---|---|
 | One database per service, each on a private network | A service owns its data; no other service can reach its database, not even through the network |
-| Synchronous saga in `registration-service`, with compensation | Event check, seat reservation, then the registration is saved; if saving fails, the seat is released. No distributed transaction, and no HTTP call inside a database transaction |
+| Saga orchestrated by `registration-service`, over Kafka | Registering writes a `PENDING` registration and its `ReserveSeat` command in one local transaction (`202 Accepted`); `event-service` reserves the seat and answers `SeatReserved` or `SeatRejected` (full, closed, unknown), which confirms or rejects the registration. No distributed transaction, no remote call while registering or cancelling: both work while `event-service` is down, and nothing is lost if a service stops |
+| Cancellation allowed while the seat is requested | The registration is cancelled at once and `ReleaseSeat` follows `ReserveSeat` on the same partition (key = event id): the release always reaches `event-service` after the reservation it undoes, and a late `SeatReserved` is ignored |
 | Idempotent seat reservation (reservation id = registration id) | A retried reserve or release never counts twice |
 | Transactional outbox with a polling publisher (`platform-messaging`) | A message is written in the transaction of its business change and published to Kafka afterwards: a crash in between loses nothing. Polling rather than Debezium: no Kafka Connect to run, ~200 ms of latency is enough here |
 | At-least-once delivery, idempotent consumers | The relay marks a message published only once Kafka has acknowledged it; consumers record each message id in the transaction of its effect, so a redelivery is a no-op |
@@ -251,8 +256,11 @@ sorting (`sort=startAt|createdAt|title[,asc|desc]`):
 
 A malformed or out-of-range filter is a `400 VALIDATION_FAILED` naming the parameter in `errors`.
 
-`GET /api/registrations/me` takes `eventId` and `status` (`CONFIRMED`, `CANCELLED`): with both, it tells whether the
-caller is registered to an event, which the event page uses.
+`POST /api/registrations` answers `202 Accepted` with a `PENDING` registration and its `Location`: the seat is reserved
+asynchronously, and the registration becomes `CONFIRMED`, or `REJECTED` with a `rejectionReason` (`EVENT_FULL`,
+`EVENT_NOT_REGISTRABLE`, `EVENT_NOT_FOUND`), usually in under a second. The web application follows it until then.
+`GET /api/registrations/me` takes `eventId` and `status` (`PENDING`, `CONFIRMED`, `REJECTED`, `CANCELLED`): newest
+first, the caller's latest registration to an event tells whether they are registered, which the event page uses.
 
 Errors are RFC 9457 problem details with a stable `code` (the HTTP status of each case is listed in the Swagger UI):
 
@@ -363,12 +371,14 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (59 c
 - security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
   attendee cancelling a registration (`404`);
-- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation, an attendee finding
-  their registration to an event; the event is cancelled at the end so that runs do not pile up in the catalogue;
+- business rules: registration accepted then confirmed through Kafka, an unknown event and a full event rejected with
+  their reason, duplicate (`409 ALREADY_REGISTERED`, also while the seat is requested), cancellation then the freed
+  seat taken, an attendee finding their registration to an event; the event is cancelled at the end so that runs do
+  not pile up in the catalogue;
 - administration: every event listed (`scope=all`, refused to an organizer), registrations of any event with the names,
   a profile found by e-mail then erased, the event of an organizer cancelled (moderation);
-- resilience: `event-service` outage (fast `503` once the instance has left discovery, gateway fallback), recovery after restart,
-  and no seat leaked;
+- resilience: `event-service` outage (a registration is still accepted and waits, gateway fallback), recovery after
+  restart (the waiting registration is confirmed), and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
   `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
   reaches Loki with its trace id;
@@ -488,8 +498,6 @@ pull request would change `main` directly and require merging `main` back into `
 
 ## Known limitations
 
-- **Saga without an outbox**: if `registration-service` stops between the seat reservation and the save of the
-  registration, the seat stays reserved. A transactional outbox with a message broker would make the saga reliable.
 - **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
   behind TLS, a fixed hostname and an external database for high availability.
 - **No "forgot password" and no "remember me"**: resetting a password sends an e-mail, and the platform has no mail

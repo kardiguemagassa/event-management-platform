@@ -1,6 +1,7 @@
 package com.kmg.eventplatform.registration.application;
 
 import com.kmg.eventplatform.registration.domain.Registration;
+import com.kmg.eventplatform.registration.domain.Registrations;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
 import com.kmg.eventplatform.registration.domain.RegistrationRepository;
 import com.kmg.eventplatform.registration.domain.RegistrationStatus;
@@ -11,7 +12,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,6 +40,7 @@ import static org.mockito.Mockito.when;
 class RegistrationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-27T10:00:00Z");
+    private static final Set<RegistrationStatus> ACTIVE = Set.of(RegistrationStatus.PENDING, RegistrationStatus.CONFIRMED);
 
     @Mock
     private RegistrationRepository repository;
@@ -47,6 +49,7 @@ class RegistrationServiceTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID organizerId = UUID.randomUUID();
     private final FakeEventCatalog events = new FakeEventCatalog();
+    private final FakeSeatRequests seats = new FakeSeatRequests();
     private final FakeAttendeeDirectory attendees = new FakeAttendeeDirectory();
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private RegistrationService service;
@@ -55,53 +58,38 @@ class RegistrationServiceTest {
     void setUp() {
         events.events.add(eventId);
         events.organizers.put(eventId, organizerId);
-        service = new RegistrationService(repository, events, Clock.fixed(NOW, ZoneOffset.UTC),
+        service = new RegistrationService(repository, events, seats, Clock.fixed(NOW, ZoneOffset.UTC),
                 new RegistrationMetrics(meters), attendees);
     }
 
     @Test
-    void registerHoldsSeatThenConfirms() {
+    void registeringRequestsTheSeatOfAPendingRegistration() {
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         Registration registration = service.register(eventId, userId);
 
-        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.PENDING);
         assertThat(registration.getCreatedAt()).isEqualTo(NOW);
-        assertThat(events.heldSeats).containsEntry(registration.getId(), eventId);
+        assertThat(registration.getUserId()).isEqualTo(userId);
+        assertThat(seats.sent).containsExactly(
+                new FakeSeatRequests.Request("reserve", eventId, registration.getId()));
+        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).as("not before the answer").isZero();
     }
 
     @Test
-    void unknownEventIsRejectedBeforeAnySideEffect() {
-        assertThatThrownBy(() -> service.register(UUID.randomUUID(), userId))
-                .isInstanceOf(EventNotFoundException.class);
-
-        assertThat(events.heldSeats).isEmpty();
-    }
-
-    @Test
-    void businessRejectionNeedsNoCompensation() {
-        events.reserveRejection = new EventFullException(eventId);
-
-        assertThatThrownBy(() -> service.register(eventId, userId)).isInstanceOf(EventFullException.class);
-
-        assertThat(events.releaseCalls).isZero();
-        verify(repository, never()).saveAndFlush(any());
-    }
-
-    @Test
-    void duplicateIsRejectedBeforeAnySideEffect() {
-        when(repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED))
-                .thenReturn(true);
+    void duplicateIsRejectedBeforeAnySeatRequest() {
+        when(repository.existsByEventIdAndUserIdAndStatusIn(eventId, userId, ACTIVE)).thenReturn(true);
 
         assertThatThrownBy(() -> service.register(eventId, userId))
                 .isInstanceOf(DuplicateRegistrationException.class);
 
-        assertThat(events.heldSeats).isEmpty();
+        assertThat(seats.sent).isEmpty();
         verify(repository, never()).saveAndFlush(any());
+        assertThat(rejected("ALREADY_REGISTERED")).isEqualTo(1);
     }
 
     @Test
-    void concurrentDuplicateLosingTheRaceReleasesItsSeat() {
+    void concurrentDuplicateLosingTheRaceRequestsNoSeat() {
         when(repository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("could not execute",
                 new SQLException("duplicate key value violates unique constraint \""
                         + RegistrationService.ACTIVE_REGISTRATION_INDEX + "\"")));
@@ -109,7 +97,8 @@ class RegistrationServiceTest {
         assertThatThrownBy(() -> service.register(eventId, userId))
                 .isInstanceOf(DuplicateRegistrationException.class);
 
-        assertThat(events.heldSeats).isEmpty();
+        assertThat(seats.sent).isEmpty();
+        assertThat(rejected("ALREADY_REGISTERED")).isEqualTo(1);
     }
 
     @Test
@@ -120,70 +109,77 @@ class RegistrationServiceTest {
         assertThatThrownBy(() -> service.register(eventId, userId))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        assertThat(events.heldSeats).isEmpty();
+        assertThat(seats.sent).isEmpty();
     }
 
     @Test
-    void reservationWithUnknownOutcomeIsCompensated() {
-        events.reserveTimesOutAfterCommit = true;
-
-        assertThatThrownBy(() -> service.register(eventId, userId))
-                .isInstanceOf(DownstreamUnavailableException.class);
-
-        assertThat(events.heldSeats).isEmpty();
-        verify(repository, never()).saveAndFlush(any());
-    }
-
-    @Test
-    void localSaveFailureReleasesTheSeat() {
-        when(repository.saveAndFlush(any())).thenThrow(new DataAccessResourceFailureException("db down"));
-
-        assertThatThrownBy(() -> service.register(eventId, userId))
-                .isInstanceOf(DataAccessResourceFailureException.class);
-
-        assertThat(events.heldSeats).isEmpty();
-    }
-
-    @Test
-    void failedCompensationNeverHidesTheOriginalFailure() {
-        when(repository.saveAndFlush(any())).thenThrow(new DataAccessResourceFailureException("db down"));
-        DownstreamUnavailableException releaseFailure = new DownstreamUnavailableException("event-service", "down");
-        events.releaseFailure = releaseFailure;
-
-        assertThatThrownBy(() -> service.register(eventId, userId))
-                .isInstanceOf(DataAccessResourceFailureException.class)
-                .hasSuppressedException(releaseFailure);
-    }
-
-    @Test
-    void cancelReleasesSeatThenCancels() {
-        Registration registration = confirmedRegistration();
-        events.heldSeats.put(registration.getId(), eventId);
+    void aReservedSeatConfirmsTheRegistrationAndIsCounted() {
+        Registration registration = pendingRegistration();
         when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
-        when(repository.saveAndFlush(registration)).thenReturn(registration);
+
+        service.seatReserved(registration.getId());
+        service.seatReserved(registration.getId());
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
+        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).as("counted once").isEqualTo(1);
+    }
+
+    @Test
+    void aRefusedSeatRejectsTheRegistrationAndIsCountedWithItsReason() {
+        Registration registration = pendingRegistration();
+        when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
+
+        service.seatRejected(registration.getId(), "EVENT_FULL");
+        service.seatRejected(registration.getId(), "EVENT_FULL");
+
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.REJECTED);
+        assertThat(registration.getRejectionReason()).isEqualTo("EVENT_FULL");
+        assertThat(rejected("EVENT_FULL")).as("counted once").isEqualTo(1);
+    }
+
+    @Test
+    void answersAboutAnUnknownRegistrationAreIgnored() {
+        UUID unknown = UUID.randomUUID();
+        when(repository.findById(unknown)).thenReturn(Optional.empty());
+
+        service.seatReserved(unknown);
+        service.seatRejected(unknown, "EVENT_FULL");
+
+        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).isZero();
+        assertThat(rejected("EVENT_FULL")).isZero();
+    }
+
+    @Test
+    void cancellingWhileTheSeatIsRequestedReleasesItAfterTheReservation() {
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        Registration registration = service.register(eventId, userId);
+        when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
 
         Registration cancelled = service.cancel(registration.getId(), userId);
+        service.seatReserved(registration.getId());
 
         assertThat(cancelled.getStatus()).isEqualTo(RegistrationStatus.CANCELLED);
         assertThat(cancelled.getCancelledAt()).isEqualTo(NOW);
-        assertThat(events.heldSeats).isEmpty();
+        assertThat(seats.sent).extracting(FakeSeatRequests.Request::type).containsExactly("reserve", "release");
+        assertThat(meters.counter(RegistrationMetrics.CANCELLED).count()).isEqualTo(1);
+        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).isZero();
     }
 
     @Test
-    void cancelKeepsRegistrationConfirmedWhenSeatCannotBeReleased() {
+    void cancellingAConfirmedRegistrationReleasesItsSeat() {
         Registration registration = confirmedRegistration();
         when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
-        events.releaseFailure = new DownstreamUnavailableException("event-service", "down");
+        when(repository.saveAndFlush(registration)).thenReturn(registration);
 
-        assertThatThrownBy(() -> service.cancel(registration.getId(), userId))
-                .isInstanceOf(DownstreamUnavailableException.class);
+        service.cancel(registration.getId(), userId);
 
-        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
-        verify(repository, never()).saveAndFlush(any());
+        assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CANCELLED);
+        assertThat(seats.sent).containsExactly(
+                new FakeSeatRequests.Request("release", eventId, registration.getId()));
     }
 
     @Test
-    void cancelOfCancelledRegistrationFailsWithoutRemoteCall() {
+    void cancelOfCancelledRegistrationFailsWithoutSeatRequest() {
         Registration registration = confirmedRegistration();
         registration.cancel(NOW);
         when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
@@ -191,7 +187,7 @@ class RegistrationServiceTest {
         assertThatThrownBy(() -> service.cancel(registration.getId(), userId))
                 .isInstanceOf(RegistrationAlreadyCancelledException.class);
 
-        assertThat(events.releaseCalls).isZero();
+        assertThat(seats.sent).isEmpty();
     }
 
     @Test
@@ -214,7 +210,7 @@ class RegistrationServiceTest {
                 .isInstanceOf(RegistrationNotFoundException.class);
 
         assertThat(registration.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
-        assertThat(events.releaseCalls).isZero();
+        assertThat(seats.sent).isEmpty();
     }
 
     @Test
@@ -229,7 +225,7 @@ class RegistrationServiceTest {
     void organizerListsTheRegistrationsOfTheirEventWithTheAttendeeNames() {
         Pageable pageable = PageRequest.of(0, 20);
         Registration withProfile = confirmedRegistration();
-        Registration withoutProfile = Registration.confirm(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW);
+        Registration withoutProfile = Registrations.confirmed(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW);
         attendees.names.put(userId, "Ada Lovelace");
         when(repository.findByEventId(eventId, pageable))
                 .thenReturn(new PageImpl<>(List.of(withProfile, withoutProfile), pageable, 2));
@@ -313,42 +309,12 @@ class RegistrationServiceTest {
         assertThat(service.findByUser(userId, eventId, RegistrationStatus.CONFIRMED, pageable)).isSameAs(page);
     }
 
+    private Registration pendingRegistration() {
+        return Registration.request(UUID.randomUUID(), eventId, userId, NOW.minusSeconds(1));
+    }
+
     private Registration confirmedRegistration() {
-        return Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.minusSeconds(3600));
-    }
-
-    @Test
-    void confirmedRegistrationIsCounted() {
-        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-
-        service.register(eventId, userId);
-
-        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).isEqualTo(1);
-    }
-
-    @Test
-    void rejectionIsCountedWithItsReason() {
-        assertThatThrownBy(() -> service.register(UUID.randomUUID(), userId))
-                .isInstanceOf(EventNotFoundException.class);
-        when(repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED))
-                .thenReturn(true);
-        assertThatThrownBy(() -> service.register(eventId, userId))
-                .isInstanceOf(DuplicateRegistrationException.class);
-
-        assertThat(rejected("EVENT_NOT_FOUND")).isEqualTo(1);
-        assertThat(rejected("ALREADY_REGISTERED")).isEqualTo(1);
-        assertThat(meters.counter(RegistrationMetrics.CONFIRMED).count()).isZero();
-    }
-
-    @Test
-    void cancellationIsCounted() {
-        Registration registration = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
-        when(repository.findById(registration.getId())).thenReturn(Optional.of(registration));
-        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-
-        service.cancel(registration.getId(), userId);
-
-        assertThat(meters.counter(RegistrationMetrics.CANCELLED).count()).isEqualTo(1);
+        return Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW.minusSeconds(3600));
     }
 
     private double rejected(String reason) {

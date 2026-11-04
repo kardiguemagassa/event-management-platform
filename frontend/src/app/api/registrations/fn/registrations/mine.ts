@@ -18,7 +18,7 @@ export interface Mine$Params {
   /**
    * Only registrations in this status
    */
-  status?: 'CONFIRMED' | 'CANCELLED';
+  status?: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
 
   /**
    * Zero-based page index (0..N)

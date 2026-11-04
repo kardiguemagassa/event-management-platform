@@ -12,6 +12,7 @@ import { mine } from '../../api/registrations/fn/registrations/mine';
 import { RegistrationsApi } from '../../api/registrations/registrations-api';
 import { ApiProblem, messageOf } from '../../core/http/api-problem';
 import { valueOf } from '../../shared/resources';
+import { isActive } from '../../shared/registrations';
 import { splitByDate, SplitRegistrations } from './my-registrations';
 
 /** Largest page the API serves, and largest batch read of events: one call each. */
@@ -71,19 +72,18 @@ export class MyRegistrationsPage {
   }
 
   private load(): Observable<SplitRegistrations> {
-    return this.registrationsApi
-      .invoke(mine, { status: 'CONFIRMED', size: MAX_PAGE, sort: ['createdAt,desc'] })
-      .pipe(
-        switchMap((page) => {
-          const registrations = page.content ?? [];
-          const ids = [...new Set(registrations.flatMap((r) => (r.eventId ? [r.eventId] : [])))];
-          if (ids.length === 0) {
-            return of(splitByDate([], [], new Date()));
-          }
-          return this.eventsApi
-            .invoke(list, { ids, size: MAX_PAGE })
-            .pipe(map((events) => splitByDate(registrations, events.content ?? [], new Date())));
-        }),
-      );
+    return this.registrationsApi.invoke(mine, { size: MAX_PAGE, sort: ['createdAt,desc'] }).pipe(
+      switchMap((page) => {
+        // Active ones only: waiting for their seat (PENDING) or holding it (CONFIRMED).
+        const registrations = (page.content ?? []).filter(isActive);
+        const ids = [...new Set(registrations.flatMap((r) => (r.eventId ? [r.eventId] : [])))];
+        if (ids.length === 0) {
+          return of(splitByDate([], [], new Date()));
+        }
+        return this.eventsApi
+          .invoke(list, { ids, size: MAX_PAGE })
+          .pipe(map((events) => splitByDate(registrations, events.content ?? [], new Date())));
+      }),
+    );
   }
 }

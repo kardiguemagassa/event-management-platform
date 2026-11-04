@@ -1,21 +1,20 @@
 package com.kmg.eventplatform.registration.application;
 
+import com.kmg.eventplatform.registration.KafkaTestcontainersConfiguration;
 import com.kmg.eventplatform.registration.TestcontainersConfiguration;
 import com.kmg.eventplatform.registration.domain.Registration;
 import com.kmg.eventplatform.registration.domain.RegistrationRepository;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
+import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -23,16 +22,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.when;
 
 /**
- * Full context against a real PostgreSQL: the unique index, not the pre-check, must win the race.
- * Downstream services are replaced by thread-safe stubs that track held seats.
+ * Full context against a real PostgreSQL: the unique index, not the pre-check, must win the race, and the losers
+ * write no seat request (their transaction, outbox included, is rolled back).
  */
 @SpringBootTest(properties = "eureka.client.enabled=false")
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, KafkaTestcontainersConfiguration.class})
 class RegistrationConcurrencyIT {
 
     private static final int ATTEMPTS = 10;
@@ -43,20 +39,11 @@ class RegistrationConcurrencyIT {
     @Autowired
     private RegistrationRepository repository;
 
-    @MockitoBean
-    private EventCatalog events;
-
-    private final Set<UUID> heldSeats = ConcurrentHashMap.newKeySet();
-
-    @BeforeEach
-    void stubDownstreams() {
-        when(events.exists(any())).thenReturn(true);
-        doAnswer(invocation -> heldSeats.add(invocation.getArgument(1))).when(events).reserveSeat(any(), any());
-        doAnswer(invocation -> heldSeats.remove(invocation.getArgument(1))).when(events).releaseSeat(any(), any());
-    }
+    @Autowired
+    private DataSource dataSource;
 
     @Test
-    void concurrentDuplicatesYieldOneRegistrationAndOneHeldSeat() throws Exception {
+    void concurrentDuplicatesYieldOneRegistrationAndOneSeatRequest() throws Exception {
         UUID eventId = UUID.randomUUID();
         UUID userId = UUID.randomUUID();
         CountDownLatch start = new CountDownLatch(1);
@@ -72,17 +59,21 @@ class RegistrationConcurrencyIT {
             start.countDown();
         }
 
-        int confirmed = 0;
+        int accepted = 0;
         for (Future<Registration> attempt : attempts) {
             try {
                 attempt.get();
-                confirmed++;
+                accepted++;
             } catch (ExecutionException rejected) {
                 assertThat(rejected.getCause()).isInstanceOf(DuplicateRegistrationException.class);
             }
         }
-        assertThat(confirmed).isEqualTo(1);
+        assertThat(accepted).isEqualTo(1);
         assertThat(repository.findByEventId(eventId, PageRequest.of(0, ATTEMPTS)).getTotalElements()).isEqualTo(1);
-        assertThat(heldSeats).hasSize(1);
+        assertThat(JdbcClient.create(dataSource)
+                .sql("SELECT COUNT(*) FROM outbox_messages WHERE message_key = :key")
+                .param("key", eventId.toString())
+                .query(Long.class).single())
+                .as("seat requests written").isEqualTo(1);
     }
 }

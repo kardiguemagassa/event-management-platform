@@ -5,7 +5,7 @@ package com.kmg.eventplatform.registration.domain;
  * Sealed: the API layer maps every subtype with an exhaustive switch.
  */
 public sealed abstract class RegistrationRuleException extends RuntimeException
-        permits RegistrationAlreadyCancelledException {
+        permits RegistrationAlreadyCancelledException, RegistrationRejectedException {
 
     private final String code;
 

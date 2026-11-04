@@ -35,6 +35,10 @@ public class Registration {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    /** Why event-service refused the seat ({@code EVENT_FULL}...), for a REJECTED registration only. */
+    @Column(name = "rejection_reason", length = 40)
+    private String rejectionReason;
+
     @Version
     private Long version;
 
@@ -47,21 +51,56 @@ public class Registration {
         this.eventId = Objects.requireNonNull(eventId, "eventId");
         this.userId = Objects.requireNonNull(userId, "userId");
         this.createdAt = Objects.requireNonNull(now, "now");
-        this.status = RegistrationStatus.CONFIRMED;
+        this.status = RegistrationStatus.PENDING;
     }
 
     /**
-     * The id is assigned by the caller because it is first sent to event-service
-     * as the idempotent reservation id, before this row exists.
+     * A new registration waits for its seat. Its id is also the idempotent reservation id sent to event-service.
      */
-    public static Registration confirm(UUID id, UUID eventId, UUID userId, Instant now) {
+    public static Registration request(UUID id, UUID eventId, UUID userId, Instant now) {
         return new Registration(id, eventId, userId, now);
     }
 
+    /**
+     * event-service reserved the seat.
+     *
+     * @return {@code false} when the registration no longer waits for it (cancelled meanwhile, or a reply delivered
+     * again): nothing changes
+     */
+    public boolean confirmSeat() {
+        if (status != RegistrationStatus.PENDING) {
+            return false;
+        }
+        status = RegistrationStatus.CONFIRMED;
+        return true;
+    }
+
+    /**
+     * event-service refused the seat.
+     *
+     * @param reason the code of the refusal, e.g. {@code EVENT_FULL}
+     * @return {@code false} when the registration no longer waits for a seat: nothing changes
+     */
+    public boolean rejectSeat(String reason) {
+        Objects.requireNonNull(reason, "reason");
+        if (status != RegistrationStatus.PENDING) {
+            return false;
+        }
+        status = RegistrationStatus.REJECTED;
+        rejectionReason = reason;
+        return true;
+    }
+
+    /**
+     * Allowed while the seat is requested too: the release then follows the reservation.
+     */
     public void cancel(Instant now) {
         Objects.requireNonNull(now, "now");
         if (status == RegistrationStatus.CANCELLED) {
             throw new RegistrationAlreadyCancelledException(id);
+        }
+        if (status == RegistrationStatus.REJECTED) {
+            throw new RegistrationRejectedException(id);
         }
         status = RegistrationStatus.CANCELLED;
         cancelledAt = now;
@@ -98,6 +137,10 @@ public class Registration {
 
     public Instant getCancelledAt() {
         return cancelledAt;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
     }
 
     public Long getVersion() {

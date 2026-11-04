@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.registration.infrastructure.client;
 
+import com.kmg.eventplatform.registration.KafkaTestcontainersConfiguration;
 import com.kmg.eventplatform.registration.TestcontainersConfiguration;
 import com.kmg.eventplatform.registration.application.AttendeeDirectory;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
@@ -35,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "registration.clients.circuit-breaker.sliding-window-size=4",
         "registration.clients.circuit-breaker.minimum-number-of-calls=4",
         "registration.clients.circuit-breaker.wait-duration-in-open-state=1m"})
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, KafkaTestcontainersConfiguration.class})
 class DownstreamResilienceIT {
 
     private static final FakeDownstream EVENT_SERVICE = FakeDownstream.start();
