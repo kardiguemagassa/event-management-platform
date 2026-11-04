@@ -268,7 +268,7 @@ services:
   registration-service:
     <<: *spring-service
     image: ${IMAGE_NAMESPACE:-local}/event-platform-registration-service:${IMAGE_TAG:-dev}
-    networks: [default, registration-net]
+    networks: [default, registration-net, messaging-net]
     build:
       context: .
       args:
@@ -285,8 +285,11 @@ services:
       # Client credentials of its service account, token requested from Keycloak on the compose network.
       REGISTRATION_SERVICE_CLIENT_SECRET: ${REGISTRATION_SERVICE_CLIENT_SECRET:?REGISTRATION_SERVICE_CLIENT_SECRET is required}
       KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/event-platform/protocol/openid-connect/token
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       registration-db:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
       discovery-server:
         condition: service_healthy

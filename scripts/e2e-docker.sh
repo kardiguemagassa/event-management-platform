@@ -69,6 +69,25 @@ check() { # LABEL EXPECTED_STATUS [EXPECTED_CODE]
 attendee() { echo "e2e.attendee.$1.$TS@example.com"; }
 attendee_token() { kc_token event-platform "$E2E_CLIENT" "$(attendee "$1")" "$E2E_PASSWORD"; }
 register() { AUTH=$(attendee_token "$1") call POST /api/registrations "{\"eventId\":\"$E\"}"; }
+# The seat is reserved asynchronously (saga over Kafka): a registration is accepted PENDING (202), then answered.
+# answered ID ATTENDEE [SECONDS] -> polls the registration until it leaves PENDING; sets CODE, BODY and STATUS.
+answered() {
+  local token i; token=$(attendee_token "$2")
+  for i in $(seq 1 "${3:-30}"); do
+    AUTH=$token call GET "/api/registrations/$1"; STATUS=$(field status)
+    [ "$STATUS" != PENDING ] && return 0; sleep 1
+  done
+}
+# expect_answer LABEL ID ATTENDEE STATUS [REJECTION_REASON]
+expect_answer() {
+  answered "$2" "$3"
+  local reason; reason=$(field rejectionReason)
+  if [ "$STATUS" = "$4" ] && { [ $# -lt 5 ] || [ "$reason" = "$5" ]; }; then
+    PASS=$((PASS+1)); echo "PASS  $1 -> $STATUS ${reason}"
+  else
+    FAIL=$((FAIL+1)); echo "FAIL  $1 -> $STATUS (expected $4 ${5:-}) body=$BODY"
+  fi
+}
 
 echo "== Test identity (Keycloak admin API)"
 cleanup() {
@@ -152,10 +171,11 @@ AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_ADMIN" "$E2E_PASSWORD") call 
 check "administrator lists the users" 200
 
 echo "== Setup"
-# registration-service needs its own view of event-service: an unknown event (404) proves it reaches it.
+# The whole saga on an unknown event: registration-service, the outbox, Kafka, event-service, and back.
 E=00000000-0000-0000-0000-000000000000
-for i in $(seq 1 30); do register 1; [ "$CODE" = 404 ] && break; sleep 2; done
-check "registration-service reaches event-service" 404
+for i in $(seq 1 30); do register 1; [ "$CODE" = 202 ] && break; sleep 2; done
+check "registration accepted, waiting for its seat" 202; R0=$(field id)
+expect_answer "event-service answers through Kafka: unknown event refused" "$R0" 1 REJECTED EVENT_NOT_FOUND
 call POST /api/events '{"title":"Docker Day","location":"Paris","startAt":"2027-03-15T18:00:00Z","capacity":2}'
 check "create event (capacity 2)" 201; E=$(field id)
 AUTH=none call GET "/api/events/$E"; check "draft hidden from anonymous callers" 404 EVENT_NOT_FOUND
@@ -232,9 +252,11 @@ AFTER=$(bff -o /dev/null -w '%{http_code}' "$B/bff/me")
 rm -f "$JAR"
 
 echo "== Business rules"
-register 1; check "register attendee 1" 201; R1=$(field id)
-register 1; check "duplicate attendee 1" 409 ALREADY_REGISTERED
-register 2; check "register attendee 2" 201; R2=$(field id)
+register 1; check "register attendee 1" 202; R1=$(field id)
+register 1; check "duplicate attendee 1, while its seat is requested" 409 ALREADY_REGISTERED
+expect_answer "attendee 1 confirmed" "$R1" 1 CONFIRMED
+register 2; check "register attendee 2" 202; R2=$(field id)
+expect_answer "attendee 2 confirmed" "$R2" 2 CONFIRMED
 AUTH=$(attendee_token 2) call POST "/api/registrations/$R1/cancel"
 check "another attendee cannot cancel the registration" 404 REGISTRATION_NOT_FOUND
 call GET "/api/registrations/events/$E"; check "organizer lists the registrations of the event" 200
@@ -248,9 +270,11 @@ call GET "/api/users/names?ids=$(python3 -c 'import uuid;print(uuid.uuid4())')"
 check "internal names route closed at the edge" 403 ACCESS_DENIED
 AUTH=$(kc_token event-platform "$E2E_CLIENT" "$E2E_OTHER" "$E2E_PASSWORD") call GET "/api/registrations/events/$E"
 check "another organizer cannot list them" 403 NOT_EVENT_ORGANIZER
-register 3; echo "      attendee 3 on full event -> $CODE $(field code)"
+register 3; R3=$(field id); expect_answer "attendee 3 refused on the full event" "$R3" 3 REJECTED EVENT_FULL
 AUTH=$(attendee_token 1) call POST "/api/registrations/$R1/cancel"; check "attendee 1 cancels their registration" 200
-register 3; check "register attendee 3 on freed seat" 201
+# Same event, same partition: the release of attendee 1 reaches event-service before this reservation.
+register 3; check "register attendee 3 on the freed seat" 202; R3=$(field id)
+expect_answer "attendee 3 confirmed" "$R3" 3 CONFIRMED
 AUTH=$(attendee_token 3) call GET "/api/registrations/me?eventId=$E&status=CONFIRMED"
 [ "$CODE" = 200 ] && [ "$(count)" = 1 ] && { PASS=$((PASS+1)); echo "PASS  attendee finds their registration to the event"; } \
                                        || { FAIL=$((FAIL+1)); echo "FAIL  registration to the event -> $CODE body=$BODY"; }
@@ -328,17 +352,23 @@ RULES=$(curl -s http://127.0.0.1:3000/api/prometheus/grafana/api/v1/rules)
   && { PASS=$((PASS+1)); echo "PASS  business metrics (confirmed, rejected EVENT_FULL) and alert rules provisioned"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  business metrics ($CONFIRMED confirmed, $FULL EVENT_FULL) or alert rules: ${RULES:0:200}"; }
 
+# Registering does not depend on event-service any more: the request waits in Kafka, and is answered on its return.
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
-for i in $(seq 1 12); do register 4; echo "      #$i -> $CODE $(field code) ${TIME}s"; done
+register 4; check "attendee 4 registers while event-service is down" 202; R4=$(field id)
+sleep 5; AUTH=$(attendee_token 4) call GET "/api/registrations/$R4"
+[ "$(field status)" = PENDING ] && { PASS=$((PASS+1)); echo "PASS  the registration waits for its seat during the outage"; } \
+                                || { FAIL=$((FAIL+1)); echo "FAIL  registration during the outage -> body=$BODY"; }
 call GET /api/events; echo "      gateway GET /api/events -> $CODE $(field code) instance=$(field instance)"
 
 echo "== Recovery"
 docker compose --profile app start event-service >/dev/null 2>&1
 until [ "$(docker compose --profile app ps --format '{{.Health}}' event-service)" = healthy ]; do sleep 2; done
 START=$(date +%s)
-for i in $(seq 1 30); do register 4; [ "$CODE" = 201 ] && break; sleep 2; done
-check "register attendee 4 after recovery ($(( $(date +%s) - START ))s after healthy)" 201
+answered "$R4" 4 90
+[ "$STATUS" = CONFIRMED ] \
+  && { PASS=$((PASS+1)); echo "PASS  registration made during the outage confirmed $(( $(date +%s) - START ))s after recovery"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  registration made during the outage -> $STATUS body=$BODY"; }
 
 # The gateway discovers the restarted instance on its own schedule (Eureka fetch and load balancer cache).
 START=$(date +%s)

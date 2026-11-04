@@ -45,6 +45,7 @@ const MESSAGES: Record<string, string> = {
   EVENT_FULL: "L'événement est complet.",
   EVENT_NOT_REGISTRABLE: 'Les inscriptions ne sont pas ouvertes pour cet événement.',
   REGISTRATION_ALREADY_CANCELLED: 'Cette inscription est déjà annulée.',
+  REGISTRATION_REJECTED: "Cette inscription a été refusée : il n'y a rien à annuler.",
   EMAIL_ALREADY_USED: 'Cette adresse e-mail est déjà utilisée par un autre compte.',
   INVALID_EVENT_STATE: "Cette action n'est pas possible dans l'état actuel de l'événement.",
   EVENT_HAS_RESERVATIONS: "L'événement a des inscrits : annule-le plutôt que de le supprimer.",

@@ -69,6 +69,11 @@
             <groupId>com.kmg.eventplatform</groupId>
             <artifactId>platform-observability</artifactId>
         </dependency>
+        <!-- Seat requests over Kafka: outbox, idempotent consumption of the replies, dead letter topics -->
+        <dependency>
+            <groupId>com.kmg.eventplatform</groupId>
+            <artifactId>platform-messaging</artifactId>
+        </dependency>
         <!-- One span per SQL query, inside the trace of the request -->
         <dependency>
             <groupId>net.ttddyy.observation</groupId>
@@ -129,6 +134,23 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Kafka container shared by the services' tests -->
+        <dependency>
+            <groupId>com.kmg.eventplatform</groupId>
+            <artifactId>platform-messaging</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

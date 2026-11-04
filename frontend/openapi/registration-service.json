@@ -29,7 +29,7 @@
           "Registrations"
         ],
         "summary": "Register the caller to an event",
-        "description": "Requires the ATTENDEE role.",
+        "description": "Requires the ATTENDEE role. The seat is reserved asynchronously: the registration is PENDING, then CONFIRMED, or REJECTED with its rejectionReason (event full, closed or unknown). Follow it at the Location returned.",
         "operationId": "register",
         "requestBody": {
           "content": {
@@ -42,8 +42,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "Registration confirmed and seat reserved",
+          "202": {
+            "description": "Registration requested, waiting for its seat (PENDING)",
             "content": {
               "application/json": {
                 "schema": {
@@ -55,14 +55,8 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "409": {
             "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -75,7 +69,8 @@
         "tags": [
           "Registrations"
         ],
-        "summary": "Cancel one of the caller's registrations and release its seat",
+        "summary": "Cancel one of the caller's registrations",
+        "description": "PENDING or CONFIRMED. Cancelled at once; its seat is released asynchronously.",
         "operationId": "cancel",
         "parameters": [
           {
@@ -90,7 +85,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Registration cancelled and seat released",
+            "description": "Registration cancelled, seat being released",
             "content": {
               "application/json": {
                 "schema": {
@@ -104,9 +99,6 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -161,7 +153,7 @@
           "Registrations"
         ],
         "summary": "List the caller's registrations",
-        "description": "Optionally for one event and in one status: eventId with CONFIRMED tells whether the caller is registered to that event.",
+        "description": "Optionally for one event and in one status. Newest first: for one event, the first registration tells whether the caller is registered (PENDING or CONFIRMED).",
         "operationId": "mine",
         "parameters": [
           {
@@ -182,7 +174,9 @@
             "schema": {
               "type": "string",
               "enum": [
+                "PENDING",
                 "CONFIRMED",
+                "REJECTED",
                 "CANCELLED"
               ]
             }
@@ -271,7 +265,9 @@
             "schema": {
               "type": "string",
               "enum": [
+                "PENDING",
                 "CONFIRMED",
+                "REJECTED",
                 "CANCELLED"
               ]
             }
@@ -407,9 +403,14 @@
           "status": {
             "type": "string",
             "enum": [
+              "PENDING",
               "CONFIRMED",
+              "REJECTED",
               "CANCELLED"
             ]
+          },
+          "rejectionReason": {
+            "type": "string"
           },
           "createdAt": {
             "type": "string",
@@ -469,7 +470,9 @@
           "status": {
             "type": "string",
             "enum": [
+              "PENDING",
               "CONFIRMED",
+              "REJECTED",
               "CANCELLED"
             ]
           },

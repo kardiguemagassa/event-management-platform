@@ -7,6 +7,6 @@ export interface EventRegistrationResponse {
   createdAt?: string;
   eventId?: string;
   id?: string;
-  status?: 'CONFIRMED' | 'CANCELLED';
+  status?: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
   userId?: string;
 }

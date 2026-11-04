@@ -93,6 +93,10 @@
     background: #ecfdf5;
     color: #047857;
   }
+  &.pending {
+    background: #fffbeb;
+    color: #92400e;
+  }
   &.cancelled {
     background: #fef2f2;
     color: #b91c1c;

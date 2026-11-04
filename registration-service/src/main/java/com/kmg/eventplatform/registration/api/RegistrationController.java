@@ -47,12 +47,13 @@ class RegistrationController {
     }
 
     @PostMapping
-    @Operation(summary = "Register the caller to an event", description = "Requires the ATTENDEE role.")
-    @ApiResponse(responseCode = "201", description = "Registration confirmed and seat reserved")
+    @Operation(summary = "Register the caller to an event",
+            description = "Requires the ATTENDEE role. The seat is reserved asynchronously: the registration is "
+                    + "PENDING, then CONFIRMED, or REJECTED with its rejectionReason (event full, closed or unknown). "
+                    + "Follow it at the Location returned.")
+    @ApiResponse(responseCode = "202", description = "Registration requested, waiting for its seat (PENDING)")
     @ApiResponse(responseCode = "400", ref = OpenApiResponses.BAD_REQUEST)
-    @ApiResponse(responseCode = "404", ref = OpenApiResponses.NOT_FOUND)
     @ApiResponse(responseCode = "409", ref = OpenApiResponses.CONFLICT)
-    @ApiResponse(responseCode = "503", ref = OpenApiResponses.SERVICE_UNAVAILABLE)
     ResponseEntity<RegistrationResponse> register(@Valid @RequestBody RegistrationRequest request,
                                                   @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
         Registration registration = service.register(request.eventId(), userId(caller));
@@ -60,13 +61,13 @@ class RegistrationController {
                 .path("/{id}")
                 .buildAndExpand(registration.getId())
                 .toUri();
-        return ResponseEntity.created(location).body(RegistrationResponse.from(registration));
+        return ResponseEntity.accepted().location(location).body(RegistrationResponse.from(registration));
     }
 
     @GetMapping("/me")
     @Operation(summary = "List the caller's registrations",
-            description = "Optionally for one event and in one status: eventId with CONFIRMED tells whether the "
-                    + "caller is registered to that event.")
+            description = "Optionally for one event and in one status. Newest first: for one event, the first "
+                    + "registration tells whether the caller is registered (PENDING or CONFIRMED).")
     @ApiResponse(responseCode = "200", description = "Page of registrations, newest first by default")
     @ApiResponse(responseCode = "400", ref = OpenApiResponses.BAD_REQUEST)
     PageResponse<RegistrationResponse> mine(
@@ -90,11 +91,11 @@ class RegistrationController {
     }
 
     @PostMapping("/{id}/cancel")
-    @Operation(summary = "Cancel one of the caller's registrations and release its seat")
-    @ApiResponse(responseCode = "200", description = "Registration cancelled and seat released")
+    @Operation(summary = "Cancel one of the caller's registrations",
+            description = "PENDING or CONFIRMED. Cancelled at once; its seat is released asynchronously.")
+    @ApiResponse(responseCode = "200", description = "Registration cancelled, seat being released")
     @ApiResponse(responseCode = "404", ref = OpenApiResponses.NOT_FOUND)
     @ApiResponse(responseCode = "409", ref = OpenApiResponses.CONFLICT)
-    @ApiResponse(responseCode = "503", ref = OpenApiResponses.SERVICE_UNAVAILABLE)
     RegistrationResponse cancel(@PathVariable UUID id, @Parameter(hidden = true) @AuthenticationPrincipal Jwt caller) {
         return RegistrationResponse.from(service.cancel(id, userId(caller)));
     }

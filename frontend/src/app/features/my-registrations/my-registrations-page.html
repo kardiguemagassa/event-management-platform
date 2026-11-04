@@ -56,6 +56,8 @@
                 <span class="badge cancelled">Événement annulé</span>
               } @else if (period() === 'passees') {
                 <span class="badge ended">Terminé</span>
+              } @else if (item.registration.status === 'PENDING') {
+                <span class="badge pending">En attente</span>
               } @else {
                 <span class="badge confirmed">Confirmée</span>
               }
