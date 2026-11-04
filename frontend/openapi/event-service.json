@@ -18,10 +18,6 @@
   ],
   "tags": [
     {
-      "name": "Capacity",
-      "description": "Internal: seat reservation for registration-service (REST alternative to messaging). Closed at the gateway (403) and restricted to the SEAT_MANAGER role: not callable from this UI."
-    },
-    {
       "name": "Events",
       "description": "Manage events and their lifecycle"
     }
@@ -405,121 +401,6 @@
         }
       }
     },
-    "/api/events/{id}/capacity/reserve": {
-      "post": {
-        "tags": [
-          "Capacity"
-        ],
-        "summary": "Reserve one seat",
-        "description": "Atomic: never overbooks. Idempotent per reservationId: a replay returns ALREADY_RESERVED.",
-        "operationId": "reserve",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Event id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CapacityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Seat reserved (or already reserved by this reservationId)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CapacityResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/AccessDenied"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
-    "/api/events/{id}/capacity/release": {
-      "post": {
-        "tags": [
-          "Capacity"
-        ],
-        "summary": "Release one seat",
-        "description": "Compensation for a failed registration. Idempotent: an unknown or already released reservationId returns NOT_RESERVED.",
-        "operationId": "release",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Event id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CapacityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Seat released (or nothing to release)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CapacityResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/AccessDenied"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
     "/api/events/{id}/cancel": {
       "post": {
         "tags": [
@@ -680,40 +561,6 @@
           "organizerId": {
             "type": "string",
             "format": "uuid"
-          }
-        }
-      },
-      "CapacityRequest": {
-        "required": [
-          "reservationId"
-        ],
-        "type": "object",
-        "properties": {
-          "reservationId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "CapacityResponse": {
-        "type": "object",
-        "properties": {
-          "eventId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "reservationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "RESERVED",
-              "ALREADY_RESERVED",
-              "RELEASED",
-              "NOT_RESERVED"
-            ]
           }
         }
       },

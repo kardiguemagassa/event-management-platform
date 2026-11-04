@@ -189,7 +189,6 @@ AUTH=not-a-jwt call GET /api/users; check "malformed access token" 401 UNAUTHENT
 AUTH=$(kc_token master admin-cli "$KEYCLOAK_ADMIN_USERNAME" "$KEYCLOAK_ADMIN_PASSWORD") call GET /api/users
 check "token issued by another realm" 401 UNAUTHENTICATED
 AUTH=none call GET "/api/events/$E"; check "anonymous read of the public catalog" 200
-call POST "/api/events/$E/capacity/reserve" '{}'; check "internal capacity route closed at the edge" 403 ACCESS_DENIED
 
 echo "== Catalog filters"
 # The search texts are percent-encoded by hand: call() passes the path as is. count: elements of a page.

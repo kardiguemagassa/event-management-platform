@@ -95,7 +95,7 @@ class DownstreamClientsConfig {
         return new DownstreamResilience(circuitBreakers, new RetryTemplate(policy));
     }
 
-    /** Calls to event-service carry the service account token (capacity routes need SEAT_MANAGER). */
+    /** Calls to event-service carry the service account token: the organizer of a draft is read too. */
     @Bean
     EventCatalog eventCatalog(@LoadBalanced RestClient.Builder loadBalanced, DownstreamClientsProperties properties,
                               DownstreamResilience resilience, ServiceAccountTokenInterceptor serviceAccount) {

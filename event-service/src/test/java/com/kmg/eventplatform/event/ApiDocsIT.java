@@ -48,9 +48,7 @@ class ApiDocsIT {
         assertThat(errorResponses).containsKeys("Unauthorized", "AccessDenied");
         assertThat(errorResponses.get("NotFound").toString()).contains("status=404").doesNotContain("status=409");
         assertThat(errorResponses.get("BadRequest").toString()).contains("VALIDATION_FAILED");
-        Map<String, Object> reserve = (Map<String, Object>) ((Map<String, Object>)
-                paths.get("/api/events/{id}/capacity/reserve")).get("post");
-        assertThat((Map<String, Object>) reserve.get("responses")).containsKey("403");
+        assertThat(paths.keySet()).noneMatch(path -> path.contains("/capacity"));
         assertThat(paths.values()).allSatisfy(path -> ((Map<String, Object>) path).values().stream()
                 .filter(Map.class::isInstance)
                 .map(operation -> (Map<String, Object>) ((Map<String, Object>) operation).get("responses"))

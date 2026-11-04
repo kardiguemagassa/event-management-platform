@@ -101,25 +101,6 @@ class GatewaySecurityIT {
         assertThat(send("GET", "/api/events", TestTokens.expired()).statusCode()).isEqualTo(401);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"/api/events/42/capacity/reserve", "/api/events/42/capacity/release"})
-    void capacityRoutesAreClosedAtTheEdgeEvenWithAValidToken(String path) throws Exception {
-        HttpResponse<String> response = send("POST", path, TestTokens.valid());
-
-        assertThat(response.statusCode()).isEqualTo(403);
-        assertThat(response.headers().firstValue("Content-Type")).hasValue("application/problem+json");
-        assertThat(response.headers().firstValue("WWW-Authenticate"))
-                .hasValue("Bearer error=\"insufficient_scope\"");
-        assertThat(response.body()).contains("\"code\":\"ACCESS_DENIED\"", "\"instance\":\"" + path + "\"");
-        assertThat(BACKEND.requests()).isZero();
-    }
-
-    @Test
-    void capacityRoutesAskAnonymousCallersToAuthenticate() throws Exception {
-        assertThat(send("POST", "/api/events/42/capacity/reserve", null).statusCode()).isEqualTo(401);
-        assertThat(BACKEND.requests()).isZero();
-    }
-
     @Test
     void userNamesRouteIsClosedAtTheEdgeEvenWithAValidToken() throws Exception {
         HttpResponse<String> response = send("GET", "/api/users/names?ids=" + UUID.randomUUID(), TestTokens.valid());

@@ -2,8 +2,6 @@ package com.kmg.eventplatform.event.application;
 
 import com.kmg.eventplatform.event.domain.CapacityRepository;
 import com.kmg.eventplatform.event.domain.Event;
-import com.kmg.eventplatform.event.domain.EventFullException;
-import com.kmg.eventplatform.event.domain.EventNotRegistrableException;
 import com.kmg.eventplatform.event.domain.EventRepository;
 import com.kmg.eventplatform.event.domain.ReservationConflictException;
 import java.time.Clock;
@@ -14,8 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Seat reservation for registration-service, over HTTP (exceptions mapped to problems) or messaging (refusals as
- * results). Both operations are idempotent per reservation id, so callers can safely retry them.
+ * Seats of the events, taken and freed for the seat commands of registration-service (Kafka). Both operations are
+ * idempotent per reservation id: a command delivered again never counts twice.
  */
 @Service
 @Transactional
@@ -32,21 +30,8 @@ public class CapacityService {
     }
 
     /**
-     * HTTP path: a refusal is an exception, mapped to its problem.
-     */
-    public CapacityOutcome reserve(UUID eventId, UUID reservationId) {
-        return switch (attemptReservation(eventId, reservationId)) {
-            case RESERVED -> CapacityOutcome.RESERVED;
-            case ALREADY_RESERVED -> CapacityOutcome.ALREADY_RESERVED;
-            case EVENT_NOT_FOUND -> throw new EventNotFoundException(eventId);
-            case EVENT_NOT_REGISTRABLE -> throw new EventNotRegistrableException(eventId,
-                    events.findById(eventId).map(Event::getStatus).orElse(null));
-            case EVENT_FULL -> throw new EventFullException(eventId);
-        };
-    }
-
-    /**
-     * Messaging path: a refusal is an answer, and nothing is left behind (no reservation row, no seat taken).
+     * A refusal is an answer, not an exception (an exception would roll back the reply written in the same
+     * transaction), and nothing is left behind: no reservation row, no seat taken.
      *
      * @throws ReservationConflictException if the reservation id is already used for another event
      */
@@ -71,16 +56,9 @@ public class CapacityService {
         return ReservationAttempt.RESERVED;
     }
 
-    public CapacityOutcome release(UUID eventId, UUID reservationId) {
-        if (!events.existsById(eventId)) {
-            throw new EventNotFoundException(eventId);
-        }
-        return releaseIfReserved(eventId, reservationId);
-    }
-
     /**
-     * Messaging path: an unknown event has no reservation to release, so this is a no-op too (an event with
-     * reservations cannot be deleted).
+     * An unknown event has no reservation to release, so this is a no-op too (an event with reservations cannot be
+     * deleted).
      */
     public CapacityOutcome releaseIfReserved(UUID eventId, UUID reservationId) {
         if (capacity.deleteReservation(reservationId, eventId) == 0) {
