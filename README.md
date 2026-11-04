@@ -109,7 +109,7 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Client credentials for service-to-service calls | `registration-service` reads the organizer of an event and the attendee names (`PROFILE_READER`) with its own identity, not the user's; the token is cached and renewed. Seats go through Kafka, not HTTP |
 | Shared `platform-security` library, imported explicitly | One implementation of token validation, role mapping and 401/403 problems; each service keeps its own access rules |
 | OpenTelemetry through Spring Boot's starter, no Java agent | Vendor-neutral standard (OTLP): the backend can become Datadog, Dynatrace or Elastic without code change; nothing to add to the images |
-| Noise dropped before export | Health probes, Eureka heartbeats and Spring Security filter spans would bury the business traces at 100 % sampling |
+| Noise dropped before export | Health probes, Eureka heartbeats, Spring Security filter spans and background SQL (the outbox relay alone polls 5 times a second) would bury the business traces at 100 % sampling |
 | Trace id in every problem response | The id a client reports leads straight to the trace and to the matching log lines |
 
 ## Security
@@ -201,7 +201,8 @@ to `grafana/otel-lgtm`:
 | `http://localhost:3100/loki/api/v1/query_range` | Loki API, used by the end-to-end test |
 
 - **Spans**: gateway, services, calls between services, and one span per SQL query (`datasource-micrometer`, query text
-  without parameter values). Health probes, Eureka calls and Spring Security internals are filtered out.
+  without parameter values). Health probes, Eureka calls, Spring Security internals and SQL run outside of any request
+  or message (the outbox relay polling every 200 ms, gauges, scheduled purges) are filtered out.
 - **Logs**: every line carries `[traceId-spanId]` on the console, and is sent to Loki with its trace and span ids
   (OpenTelemetry Logback appender, installed by `platform-observability`: no `logback-spring.xml` per service). In
   Grafana, **Explore**, data source **Loki**: `{service_name="registration-service"} | trace_id="<traceId>"`, or from a
@@ -375,7 +376,7 @@ uploaded with the HTML report.
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (70 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (71 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -396,7 +397,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (70 c
   trace id), recovery after
   restart (the waiting registration is confirmed), and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
-  `event-service` and its SQL query, an error response of a service and of the gateway carries the id of its trace,
+  `event-service` and its SQL query, no trace starts with a background SQL query, an error response of a service and
+  of the gateway carries the id of its trace,
   and the log of a request
   reaches Loki with its trace id;
 - dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
