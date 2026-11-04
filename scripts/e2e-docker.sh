@@ -390,6 +390,12 @@ SEATS=$(field availableSeats)
 [ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, attendees 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
 
+# registration-service still calls event-service over HTTP (organizer of an event): it finds the restarted instance on
+# its own discovery schedule, independent of the gateway's.
+START=$(date +%s)
+for i in $(seq 1 30); do call GET "/api/registrations/events/$E"; [ "$CODE" = 200 ] && break; sleep 1; done
+check "registration-service reaches event-service again ($(( $(date +%s) - START ))s)" 200
+
 echo "== Right to erasure"
 AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204
 call GET "/api/registrations/events/$E?status=CONFIRMED"
