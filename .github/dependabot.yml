@@ -14,6 +14,10 @@ updates:
     target-branch: dev
     schedule:
       interval: weekly
+    ignore:
+      # Paired with the OpenTelemetry SDK that Spring Boot manages (see opentelemetry-instrumentation.version in the
+      # root pom): a newer appender needs a newer SDK and fails at runtime. Updated with Spring Boot, by hand.
+      - dependency-name: io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0
     groups:
       maven-minor-and-patch:
         update-types: [minor, patch]
@@ -27,6 +31,10 @@ updates:
     target-branch: dev
     schedule:
       interval: weekly
+    ignore:
+      # The TypeScript major is set by the Angular version (its supported range): updated with Angular, by hand.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     groups:
       # Angular packages move together (framework, CLI, Material): one pull request per release.
       angular:
