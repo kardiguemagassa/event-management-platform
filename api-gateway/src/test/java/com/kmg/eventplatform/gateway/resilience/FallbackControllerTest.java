@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.resilience;
 
+import com.kmg.eventplatform.gateway.tracing.TracedExchanges;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -39,6 +40,16 @@ class FallbackControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
         assertThat(response.getBody().getProperties()).containsEntry("code", "UPSTREAM_TIMEOUT");
+    }
+
+    @Test
+    void problemCarriesTheIdOfTheTrace() {
+        MockServerWebExchange exchange = TracedExchanges.traced(
+                failedExchange(new ConnectException("Connection refused")), "4bf92f3577b34da6a3ce929d0e0e4736");
+
+        ResponseEntity<ProblemDetail> response = controller.unavailable(exchange);
+
+        assertThat(response.getBody().getProperties()).containsEntry("traceId", "4bf92f3577b34da6a3ce929d0e0e4736");
     }
 
     private static MockServerWebExchange failedExchange(Throwable failure) {

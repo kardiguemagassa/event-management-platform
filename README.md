@@ -208,7 +208,8 @@ to `grafana/otel-lgtm`:
   trace in Tempo, the logs of a span. `registration-service` logs each registration requested, confirmed, rejected and
   cancelled (ids only), `event-service` each seat taken, refused and released: one trace follows a registration from
   the `POST` to its answer, across Kafka (the `traceparent` of the request is stored with each outbox message).
-- **Errors**: every problem answered by a service carries `traceId`, for example
+- **Errors**: every problem answered by a service or by the gateway itself (`401`, `403`, fallback `503` and `504`)
+  carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
 - **Metrics**: exported over OTLP to Prometheus. Three dashboards, versioned in `observability/grafana/dashboards` and
@@ -370,7 +371,7 @@ uploaded with the HTML report.
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (67 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (69 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -387,10 +388,12 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (67 c
   not pile up in the catalogue;
 - administration: every event listed (`scope=all`, refused to an organizer), registrations of any event with the names,
   a profile found by e-mail then erased, the event of an organizer cancelled (moderation);
-- resilience: `event-service` outage (a registration is still accepted and waits, gateway fallback), recovery after
+- resilience: `event-service` outage (a registration is still accepted and waits, gateway fallback `503` with its
+  trace id), recovery after
   restart (the waiting registration is confirmed), and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
-  `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
+  `event-service` and its SQL query, an error response of a service and of the gateway carries the id of its trace,
+  and the log of a request
   reaches Loki with its trace id;
 - dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
   dashboards read, are found in Prometheus.
@@ -524,8 +527,6 @@ pull request would change `main` directly and require merging `main` back into `
 - **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
 - **`otel-lgtm` is a development backend**: one container, no persistence, default Grafana account. Production would
   run a collector and the backends separately (or send OTLP to a vendor).
-- **Errors raised by the gateway itself** (its 401 and its fallback `503`) do not carry the trace id yet; the gateway
-  logs do.
 - **Calls to Keycloak are not traced**: Spring Security fetches tokens and signing keys with its own HTTP clients.
 - **Incoming `traceparent` headers are trusted** at the edge; a public deployment would restart traces at the gateway.
 - **Client-side discovery**: after a restart, callers may get `503` for a few seconds, until Eureka and the load
