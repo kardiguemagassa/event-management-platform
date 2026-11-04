@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.security;
 
+import com.kmg.eventplatform.gateway.tracing.TraceIds;
 import org.jspecify.annotations.NonNull;
 import org.springframework.core.ResolvableType;
 import org.springframework.http.HttpHeaders;
@@ -23,7 +24,7 @@ import java.util.Map;
 
 /**
  * Writes authentication (401) and authorization (403) failures as RFC 9457 problems with a stable code, like
- * every other error of the platform, and with the RFC 6750 {@code WWW-Authenticate} challenge.
+ * every other error of the platform, with the id of the trace and the RFC 6750 {@code WWW-Authenticate} challenge.
  * <p>
  * The problem is written with the application's own codecs, so its JSON is identical to the one of controllers.
  * The challenge carries the error code only: the error description (expiry date, failed claim...) stays out.
@@ -60,6 +61,7 @@ class ProblemDetailSecurityHandler implements ServerAuthenticationEntryPoint, Se
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setProperty("code", code);
         problem.setInstance(URI.create(exchange.getRequest().getPath().value()));
+        TraceIds.addTo(problem, exchange);
 
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(status);

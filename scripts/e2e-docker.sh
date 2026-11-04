@@ -185,6 +185,12 @@ check "another organizer cannot cancel the event" 403 NOT_EVENT_ORGANIZER
 
 echo "== Security at the gateway"
 AUTH=none call GET /api/users; check "anonymous call to a protected route" 401 UNAUTHENTICATED
+# An error answered by the gateway itself carries the id of its trace too, like the errors of the services.
+GATEWAY_TRACE_ID=$(openssl rand -hex 16)
+TRACEPARENT="00-$GATEWAY_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=none call GET /api/users
+[ "$CODE" = 401 ] && [ "$(field traceId)" = "$GATEWAY_TRACE_ID" ] \
+  && { PASS=$((PASS+1)); echo "PASS  gateway problem carries the trace id -> $CODE $(field code)"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  gateway problem trace id (expected $GATEWAY_TRACE_ID) -> $CODE body=$BODY"; }
 AUTH=not-a-jwt call GET /api/users; check "malformed access token" 401 UNAUTHENTICATED
 AUTH=$(kc_token master admin-cli "$KEYCLOAK_ADMIN_USERNAME" "$KEYCLOAK_ADMIN_PASSWORD") call GET /api/users
 check "token issued by another realm" 401 UNAUTHENTICATED
@@ -317,7 +323,8 @@ logs_of_trace() {
   curl -s -G http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode since=15m \
     --data-urlencode "query={service_name=\"registration-service\"} | trace_id=\"$LOG_TRACE_ID\""
 }
-for i in $(seq 1 15); do LOGS=$(logs_of_trace); [[ "$LOGS" == *"cancelled on event"* ]] && break; sleep 2; done
+# Up to 60 s: logs are exported in batches, then indexed by Loki, slower on a loaded CI runner.
+for i in $(seq 1 30); do LOGS=$(logs_of_trace); [[ "$LOGS" == *"cancelled on event"* ]] && break; sleep 2; done
 [[ "$LOGS" == *"cancelled on event"* ]] && { PASS=$((PASS+1)); echo "PASS  log of the request in Loki with its trace id"; } \
                                      || { FAIL=$((FAIL+1)); echo "FAIL  no log for trace $LOG_TRACE_ID in Loki: ${LOGS:0:300}"; }
 
@@ -368,7 +375,10 @@ register 4; check "attendee 4 registers while event-service is down" 202; R4=$(f
 sleep 5; AUTH=$(attendee_token 4) call GET "/api/registrations/$R4"
 [ "$(field status)" = PENDING ] && { PASS=$((PASS+1)); echo "PASS  the registration waits for its seat during the outage"; } \
                                 || { FAIL=$((FAIL+1)); echo "FAIL  registration during the outage -> body=$BODY"; }
-call GET /api/events; echo "      gateway GET /api/events -> $CODE $(field code) instance=$(field instance)"
+call GET /api/events
+[ "$CODE" = 503 ] && [ "$(field code)" = SERVICE_UNAVAILABLE ] && [[ "$(field traceId)" =~ ^[0-9a-f]{32}$ ]] \
+  && { PASS=$((PASS+1)); echo "PASS  gateway fallback during the outage, with its trace id -> $CODE $(field code)"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  gateway fallback during the outage -> $CODE body=$BODY"; }
 
 echo "== Recovery"
 docker compose --profile app start event-service >/dev/null 2>&1
