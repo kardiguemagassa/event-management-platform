@@ -233,8 +233,12 @@ to `grafana/otel-lgtm`:
   2 minutes, calls rejected by an open circuit breaker for 2 minutes (a sustained outage under traffic). A
   half-open breaker alone is not alerted: without traffic it stays half-open after the downstream has recovered,
   which is not an incident. For the saga: an outbox not published for a minute (Kafka down), registrations waiting
-  for their seat for 2 minutes (event-service down or lagging), and any message sent to a dead letter topic. No contact point in development; production would route them
-  to the on-call channel.
+  for their seat for 2 minutes (event-service down or lagging), and any message sent to a dead letter topic.
+- **Alert routing** (`observability/grafana/notifications.yaml`): every alert goes to the e-mail contact point
+  "On-call e-mail", one notification per rule with every service it fires for; repeated every hour while a critical
+  alert fires, every 4 hours for a warning. Recipients in `ALERT_EMAIL_TO`, SMTP server in the `GRAFANA_SMTP_*`
+  variables of `.env` (off by default: the alerts then only show in Grafana). To check the delivery: Grafana,
+  **Alerting**, **Contact points**, "On-call e-mail", **Test**.
 
 ## API
 
@@ -371,7 +375,7 @@ uploaded with the HTML report.
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (69 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (70 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -398,7 +402,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (69 c
 - dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
   dashboards read, are found in Prometheus.
 - business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, the
-  outbox of both services and the waiting registrations are measured, and the alert rules are loaded in Grafana.
+  outbox of both services and the waiting registrations are measured, the alert rules are loaded in Grafana and
+  routed to the e-mail contact point.
 
 ### Docker setup at a glance
 
@@ -542,5 +547,5 @@ pull request would change `main` directly and require merging `main` back into `
 |---|---|
 | **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end tests (Playwright, axe-core) (done) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) (done); saga metrics, dashboard and alerts (done); HTTP seat route removed (done) |
-| **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
+| **1.2.0** | Issue #37 investigated and closed (done); trace id in the gateway's own errors (done); alerts routed by e-mail (done) |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

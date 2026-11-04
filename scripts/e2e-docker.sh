@@ -368,6 +368,14 @@ done
   && { PASS=$((PASS+1)); echo "PASS  saga metrics (outbox of $OUTBOX services, registrations waiting) and their alert rules"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  saga metrics (outbox: $OUTBOX series, waiting: $STALE) or alert rules"; }
 
+# The alerts are routed: the e-mail contact point exists and is the root of the notification policy tree.
+CONTACT_POINTS=$(curl -s -u admin:admin http://127.0.0.1:3000/api/v1/provisioning/contact-points)
+POLICIES=$(curl -s -u admin:admin http://127.0.0.1:3000/api/v1/provisioning/policies)
+[[ "$CONTACT_POINTS" == *'"name":"On-call e-mail"'* && "$CONTACT_POINTS" == *'"type":"email"'* \
+   && "$POLICIES" == *'"receiver":"On-call e-mail"'* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  alerts routed to the e-mail contact point"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  alert routing: ${CONTACT_POINTS:0:200} ${POLICIES:0:200}"; }
+
 # Registering does not depend on event-service any more: the request waits in Kafka, and is answered on its return.
 echo "== Outage: event-service stopped"
 docker compose --profile app stop event-service >/dev/null 2>&1
