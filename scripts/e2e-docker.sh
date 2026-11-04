@@ -318,6 +318,14 @@ TRACEPARENT="00-$ERROR_TRACE_ID-$(openssl rand -hex 8)-01" AUTH=none call GET /a
   && { PASS=$((PASS+1)); echo "PASS  problem response carries the trace id -> $CODE $(field code)"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  problem trace id (expected $ERROR_TRACE_ID) -> $CODE body=$BODY"; }
 
+# Background SQL (the outbox relay polling every 200 ms, gauges, purges) is not traced: no trace starts with a query.
+NOW=$(date +%s)
+BACKGROUND=$(curl -s -G http://127.0.0.1:3200/api/search --data-urlencode 'q={ trace:rootName = "query" }' \
+  --data-urlencode "start=$((NOW - 60))" --data-urlencode "end=$NOW" --data-urlencode limit=20 \
+  | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["traces"]))' 2>/dev/null || echo error)
+[ "$BACKGROUND" = 0 ] && { PASS=$((PASS+1)); echo "PASS  no trace for background SQL (outbox relay, gauges)"; } \
+                      || { FAIL=$((FAIL+1)); echo "FAIL  traces started by a SQL query in the last minute: $BACKGROUND"; }
+
 # The log of a request reaches Loki with the id of its trace: Grafana goes from a trace to its logs.
 logs_of_trace() {
   curl -s -G http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode since=15m \
