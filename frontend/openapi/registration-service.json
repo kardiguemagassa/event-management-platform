@@ -360,7 +360,7 @@
           },
           "detail": {
             "type": "string",
-            "example": "Event 3f2b8c1e-\u2026 has no seat left"
+            "example": "User 9b1deb4d-\u2026 is already registered to event 3f2b8c1e-\u2026"
           },
           "instance": {
             "type": "string",
@@ -369,7 +369,7 @@
           "code": {
             "type": "string",
             "description": "Stable machine-readable error code",
-            "example": "EVENT_FULL"
+            "example": "ALREADY_REGISTERED"
           }
         }
       },
@@ -573,7 +573,7 @@
         }
       },
       "Conflict": {
-        "description": "Business conflict (event full or not registrable, already registered, already cancelled, concurrent modification)",
+        "description": "Business conflict (already registered, already cancelled, rejected, concurrent modification)",
         "content": {
           "application/problem+json": {
             "schema": {
@@ -583,9 +583,9 @@
               "type": "about:blank",
               "title": "Conflict",
               "status": 409,
-              "detail": "Event 3f2b8c1e-\u2026 is full",
+              "detail": "User 9b1deb4d-\u2026 is already registered to event 3f2b8c1e-\u2026",
               "instance": "/api/registrations",
-              "code": "EVENT_FULL"
+              "code": "ALREADY_REGISTERED"
             }
           }
         }

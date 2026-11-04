@@ -1,11 +1,19 @@
 package com.kmg.eventplatform.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kmg.eventplatform.security.test.TestTokens;
+import com.kmg.eventplatform.event.application.CapacityOutcome;
+import com.kmg.eventplatform.event.application.CapacityService;
+import com.kmg.eventplatform.event.application.EventService;
+import com.kmg.eventplatform.event.application.ReservationAttempt;
+import com.kmg.eventplatform.event.domain.Event;
+import com.kmg.eventplatform.event.domain.EventDetails;
+import com.kmg.eventplatform.event.domain.EventHasReservationsException;
+import com.kmg.eventplatform.event.domain.EventRepository;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -13,21 +21,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.web.client.RestClient;
 
 /**
- * Proves the capacity guarantees under real concurrency (HTTP + PostgreSQL):
- * no overbooking, idempotent replays, consistent counters.
+ * Proves the capacity guarantees under real concurrency against PostgreSQL: no overbooking, idempotent replays,
+ * consistent counters. The seat commands of Kafka are handled by this same service, one transaction each.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -35,46 +35,29 @@ import org.springframework.web.client.RestClient;
 @Import({TestcontainersConfiguration.class, KafkaTestcontainersConfiguration.class})
 class CapacityConcurrencyIT {
 
-    private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT =
-            new ParameterizedTypeReference<>() { };
+    private static final Instant START = Instant.parse("2099-06-01T18:00:00Z");
 
-    /** The organizer creates the events; registration-service's service account reserves the seats. */
-    private static final String ORGANIZER = TestTokens.forUser(UUID.randomUUID(), "ORGANIZER");
-    private static final String SEAT_MANAGER = TestTokens.forUser(TestTokens.SERVICE_ACCOUNT, "SEAT_MANAGER");
+    @Autowired
+    private CapacityService capacity;
 
-    @DynamicPropertySource
-    static void tokenValidation(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestTokens::jwkSetUri);
-    }
+    @Autowired
+    private EventService events;
 
-    @Value("${local.server.port}")
-    private int port;
+    @Autowired
+    private EventRepository repository;
 
-    private ResponseEntity<Map<String, Object>> send(HttpMethod method, String path, Object body) {
-        String token = path.contains("/capacity/") ? SEAT_MANAGER : ORGANIZER;
-        RestClient.RequestBodySpec request = RestClient.create("http://localhost:" + port).method(method).uri(path)
-                .header("Authorization", "Bearer " + token);
-        if (body != null) {
-            request.contentType(MediaType.APPLICATION_JSON).body(body);
+    private final UUID organizer = UUID.randomUUID();
+
+    private UUID event(int seats, boolean published) {
+        Event event = events.create(new EventDetails("Concurrency", null, "Paris", START, seats), organizer);
+        if (published) {
+            events.publish(event.getId(), organizer);
         }
-        return request.retrieve().onStatus(HttpStatusCode::isError, (req, res) -> { }).toEntity(JSON_OBJECT);
+        return event.getId();
     }
 
-    private String publishedEvent(int capacity) {
-        Map<String, Object> body = Map.of("title", "Concurrency", "location", "Paris",
-                "startAt", "2099-06-01T18:00:00Z", "capacity", capacity);
-        String id = (String) send(HttpMethod.POST, "/api/events", body).getBody().get("id");
-        send(HttpMethod.POST, "/api/events/" + id + "/publish", null);
-        return id;
-    }
-
-    private ResponseEntity<Map<String, Object>> capacity(String eventId, String action, UUID reservationId) {
-        return send(HttpMethod.POST, "/api/events/" + eventId + "/capacity/" + action,
-                Map.of("reservationId", reservationId.toString()));
-    }
-
-    private Map<String, Object> event(String eventId) {
-        return send(HttpMethod.GET, "/api/events/" + eventId, null).getBody();
+    private int reservedSeats(UUID eventId) {
+        return repository.findById(eventId).orElseThrow().getReservedSeats();
     }
 
     /** Starts all calls at the same instant to maximize contention. */
@@ -99,56 +82,52 @@ class CapacityConcurrencyIT {
 
     @Test
     void twentyConcurrentReservationsNeverOverbookFiveSeats() throws Exception {
-        String eventId = publishedEvent(5);
+        UUID eventId = event(5, true);
 
-        List<ResponseEntity<Map<String, Object>>> responses =
-                concurrently(20, () -> capacity(eventId, "reserve", UUID.randomUUID()));
+        List<ReservationAttempt> attempts =
+                concurrently(20, () -> capacity.attemptReservation(eventId, UUID.randomUUID()));
 
-        assertThat(responses).filteredOn(r -> r.getStatusCode().value() == 200).hasSize(5);
-        assertThat(responses).filteredOn(r -> r.getStatusCode().value() == 409).hasSize(15)
-                .allSatisfy(r -> assertThat(r.getBody()).containsEntry("code", "EVENT_FULL"));
-        assertThat(event(eventId)).containsEntry("reservedSeats", 5).containsEntry("availableSeats", 0);
+        assertThat(attempts).filteredOn(ReservationAttempt.RESERVED::equals).hasSize(5);
+        assertThat(attempts).filteredOn(ReservationAttempt.EVENT_FULL::equals).hasSize(15);
+        assertThat(reservedSeats(eventId)).isEqualTo(5);
     }
 
     @Test
     void concurrentReplaysOfTheSameReservationTakeOneSeat() throws Exception {
-        String eventId = publishedEvent(5);
+        UUID eventId = event(5, true);
         UUID reservationId = UUID.randomUUID();
 
-        List<ResponseEntity<Map<String, Object>>> responses =
-                concurrently(10, () -> capacity(eventId, "reserve", reservationId));
+        List<ReservationAttempt> attempts =
+                concurrently(10, () -> capacity.attemptReservation(eventId, reservationId));
 
-        assertThat(responses).allSatisfy(r -> assertThat(r.getStatusCode().value()).isEqualTo(200));
-        assertThat(responses).filteredOn(r -> "RESERVED".equals(r.getBody().get("outcome"))).hasSize(1);
-        assertThat(event(eventId)).containsEntry("reservedSeats", 1);
+        assertThat(attempts).allMatch(ReservationAttempt::isReserved);
+        assertThat(attempts).filteredOn(ReservationAttempt.RESERVED::equals).hasSize(1);
+        assertThat(reservedSeats(eventId)).isEqualTo(1);
     }
 
     @Test
     void releaseIsIdempotentAndKeepsCountersConsistent() {
-        String eventId = publishedEvent(5);
+        UUID eventId = event(5, true);
         UUID reservationId = UUID.randomUUID();
-        capacity(eventId, "reserve", reservationId);
-        assertThat(send(HttpMethod.DELETE, "/api/events/" + eventId, null).getBody())
+        capacity.attemptReservation(eventId, reservationId);
+        assertThatThrownBy(() -> events.delete(eventId, organizer))
                 .as("an event with reservations cannot be deleted")
-                .containsEntry("code", "EVENT_HAS_RESERVATIONS");
+                .isInstanceOf(EventHasReservationsException.class);
 
-        assertThat(capacity(eventId, "release", reservationId).getBody()).containsEntry("outcome", "RELEASED");
-        assertThat(capacity(eventId, "release", reservationId).getBody()).containsEntry("outcome", "NOT_RESERVED");
+        assertThat(capacity.releaseIfReserved(eventId, reservationId)).isEqualTo(CapacityOutcome.RELEASED);
+        assertThat(capacity.releaseIfReserved(eventId, reservationId)).isEqualTo(CapacityOutcome.NOT_RESERVED);
 
-        assertThat(event(eventId)).containsEntry("reservedSeats", 0).containsEntry("availableSeats", 5);
-        assertThat(send(HttpMethod.DELETE, "/api/events/" + eventId, null).getStatusCode().value()).isEqualTo(204);
+        assertThat(reservedSeats(eventId)).isZero();
+        events.delete(eventId, organizer);
+        assertThat(repository.existsById(eventId)).isFalse();
     }
 
     @Test
-    void draftEventIsNotRegistrable() {
-        Map<String, Object> body = Map.of("title", "Draft", "location", "Paris",
-                "startAt", "2099-06-01T18:00:00Z", "capacity", 5);
-        String eventId = (String) send(HttpMethod.POST, "/api/events", body).getBody().get("id");
+    void aDraftEventIsNotRegistrable() {
+        UUID eventId = event(5, false);
 
-        ResponseEntity<Map<String, Object>> response = capacity(eventId, "reserve", UUID.randomUUID());
-
-        assertThat(response.getStatusCode().value()).isEqualTo(409);
-        assertThat(response.getBody()).containsEntry("code", "EVENT_NOT_REGISTRABLE");
-        assertThat(event(eventId)).containsEntry("reservedSeats", 0);
+        assertThat(capacity.attemptReservation(eventId, UUID.randomUUID()))
+                .isEqualTo(ReservationAttempt.EVENT_NOT_REGISTRABLE);
+        assertThat(reservedSeats(eventId)).isZero();
     }
 }

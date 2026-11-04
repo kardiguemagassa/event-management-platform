@@ -6,6 +6,5 @@
   "configuration": "EventsApiConfiguration",
   "promises": false,
   "ignoreUnusedModels": true,
-  "silent": true,
-  "excludeTags": ["Capacity"]
+  "silent": true
 }

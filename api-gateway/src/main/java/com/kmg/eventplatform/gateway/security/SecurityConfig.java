@@ -59,8 +59,8 @@ class SecurityConfig {
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .requestCache(ServerHttpSecurity.RequestCacheSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
-                        // Internal routes of registration-service, reached through discovery and never from outside.
-                        .pathMatchers("/api/events/*/capacity/**", "/api/users/names").denyAll()
+                        // Internal route of registration-service, reached through discovery and never from outside.
+                        .pathMatchers("/api/users/names").denyAll()
                         .pathMatchers(HttpMethod.GET, "/api/events", "/api/events/**").permitAll()
                         .pathMatchers(HttpMethod.GET, API_DOCS).permitAll()
                         .pathMatchers(HttpMethod.GET, "/actuator/health/**", "/actuator/info").permitAll()

@@ -1,9 +1,7 @@
 package com.kmg.eventplatform.event.application;
 
-/** Result of a reserve/release call; replays are reported explicitly but are not errors. */
+/** Result of a seat release; releasing a seat that is not held is a no-op, reported explicitly. */
 public enum CapacityOutcome {
-    RESERVED,
-    ALREADY_RESERVED,
     RELEASED,
     NOT_RESERVED
 }

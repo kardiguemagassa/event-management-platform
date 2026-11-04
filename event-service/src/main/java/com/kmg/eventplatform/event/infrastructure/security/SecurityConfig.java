@@ -25,8 +25,6 @@ public class SecurityConfig {
         return platform.resourceServer(http)
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.FORWARD).permitAll()
-                        // Seat reservation: service account of registration-service only.
-                        .requestMatchers("/api/events/*/capacity/**").hasRole("SEAT_MANAGER")
                         // Every event of every organizer, drafts included: administrators only.
                         .requestMatchers(allEvents()).hasRole("ADMIN")
                         // "My events" of an organizer, drafts included: the role, not just a token.

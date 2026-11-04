@@ -1,7 +1,6 @@
 package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
-import com.kmg.eventplatform.registration.application.EventFullException;
 import com.kmg.eventplatform.registration.application.EventRegistration;
 import com.kmg.eventplatform.registration.application.NotEventOrganizerException;
 import com.kmg.eventplatform.registration.application.RegistrationNotFoundException;
@@ -238,15 +237,6 @@ class RegistrationControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.errors.eventId").exists());
-    }
-
-    @Test
-    void fullEventIsAConflict() throws Exception {
-        when(service.register(eventId, userId)).thenThrow(new EventFullException(eventId));
-
-        register(eventId)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("EVENT_FULL"));
     }
 
     @Test
