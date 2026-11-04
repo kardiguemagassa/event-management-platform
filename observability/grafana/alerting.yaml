@@ -75,3 +75,103 @@ groups:
             For 2 minutes, calls to {{ $labels.name }} have been answered by the fallback because its breaker is open:
             the downstream service is down or too slow. See the Resilience dashboard.
           runbook_url: /d/event-platform-resilience
+
+      # Seat saga (Kafka): a registration waits for event-service's answer. These three tell that someone is waiting
+      # longer than they should, before anybody complains. See the "Seat saga" row of the Business dashboard.
+      - uid: event-platform-outbox-stuck
+        title: Outbox not published
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              # Age of the oldest message waiting for Kafka: a few hundred milliseconds normally.
+              expr: max by (service_name) (messaging_outbox_oldest_seconds)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [60] }
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The outbox of {{ $labels.service_name }} has not been published for more than a minute
+          description: >-
+            Messages written by {{ $labels.service_name }} do not reach Kafka: the broker is down or refuses them
+            (log "Outbox message ... not published"). They are kept and published once it is back; the requests
+            behind them wait meanwhile.
+          runbook_url: /d/event-platform-business
+
+      - uid: event-platform-registrations-stuck
+        title: Registrations waiting for their seat
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              # Registrations still PENDING after a minute (the gauge counts them): an answer takes under a second.
+              expr: max(registrations_pending_stale{service_name="registration-service"})
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $values.A }} registration(s) waiting for their seat for more than a minute"
+          description: >-
+            event-service does not answer the seat commands: it is down, its consumer lags, or a command is in the
+            dead letter topic. The registrations are confirmed or rejected once it answers; see the consumer lag and
+            the dead letters on the Business dashboard.
+          runbook_url: /d/event-platform-business
+
+      - uid: event-platform-dead-letters
+        title: Message sent to a dead letter topic
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum by (service_name, topic) (increase(messaging_dead_letters_total[10m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service_name }} sent a message from {{ $labels.topic }} to its dead letter topic"
+          description: >-
+            A message could not be handled after its retries, or could not be read: the request behind it is left
+            unanswered. Its log line ("sent to ... .dlt") gives its partition and offset, and the record in the .dlt
+            topic carries the exception in its headers.
+          runbook_url: /d/event-platform-business

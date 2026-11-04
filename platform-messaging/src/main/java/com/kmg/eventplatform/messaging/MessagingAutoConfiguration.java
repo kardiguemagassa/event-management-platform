@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.messaging;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Tracer;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.ObjectProvider;
@@ -11,6 +12,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.CommonErrorHandler;
+import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -69,16 +71,30 @@ public class MessagingAutoConfiguration {
                 new KafkaTemplate<>(producerFactory), clock.getIfAvailable(Clock::systemUTC), properties);
     }
 
+    /** Bound by Spring Boot to the meter registry of the service (actuator). */
+    @Bean
+    @ConditionalOnMissingBean
+    OutboxMetrics outboxMetrics(DataSource dataSource, ObjectProvider<Clock> clock) {
+        return new OutboxMetrics(JdbcClient.create(dataSource), clock.getIfAvailable(Clock::systemUTC));
+    }
+
     /**
      * Applied by Spring Boot to the listeners: a failing message is retried, then sent to the dead letter topic of
      * its topic ({@link MessagingTopics#deadLetterOf}) with the exception in its headers, and the partition moves on.
-     * A message that cannot be read is not retried.
+     * A message that cannot be read is not retried. Each dead letter is logged and counted
+     * ({@code messaging.dead.letters}, by source topic): a message left unhandled is an alert.
      */
     @Bean
     @ConditionalOnMissingBean(CommonErrorHandler.class)
-    DefaultErrorHandler messagingErrorHandler(KafkaTemplate<?, ?> kafkaTemplate) {
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
+    DefaultErrorHandler messagingErrorHandler(KafkaTemplate<?, ?> kafkaTemplate,
+                                              ObjectProvider<MeterRegistry> meterRegistry) {
+        DeadLetterPublishingRecoverer deadLetters = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (failed, exception) -> new TopicPartition(MessagingTopics.deadLetterOf(failed.topic()), -1));
+        DeadLetterCounter counter = new DeadLetterCounter(meterRegistry);
+        ConsumerRecordRecoverer recoverer = (failed, exception) -> {
+            deadLetters.accept(failed, exception);
+            counter.sent(failed, exception);
+        };
         DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, new FixedBackOff(RETRY_INTERVAL_MS, RETRIES));
         handler.addNotRetryableExceptions(InvalidMessageException.class, JacksonException.class);
         return handler;

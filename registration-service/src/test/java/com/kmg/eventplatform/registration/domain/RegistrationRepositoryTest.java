@@ -131,6 +131,16 @@ class RegistrationRepositoryTest {
     }
 
     @Test
+    void countsTheRegistrationsWaitingSinceBeforeAnInstant() {
+        repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, userId, NOW));
+        repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW.plusSeconds(120)));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW));
+
+        assertThat(repository.countByStatusAndCreatedAtBefore(RegistrationStatus.PENDING, NOW.plusSeconds(60)))
+                .isEqualTo(1);
+    }
+
+    @Test
     void databaseRejectsRejectedRowWithoutReason() {
         assertThatThrownBy(() -> jdbcTemplate.update(
                 "INSERT INTO registrations (id, event_id, user_id, status, created_at) VALUES (?, ?, ?, 'REJECTED', now())",
