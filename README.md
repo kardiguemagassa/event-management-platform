@@ -208,7 +208,8 @@ to `grafana/otel-lgtm`:
   trace in Tempo, the logs of a span. `registration-service` logs each registration requested, confirmed, rejected and
   cancelled (ids only), `event-service` each seat taken, refused and released: one trace follows a registration from
   the `POST` to its answer, across Kafka (the `traceparent` of the request is stored with each outbox message).
-- **Errors**: every problem answered by a service carries `traceId`, for example
+- **Errors**: every problem answered by a service or by the gateway itself (`401`, `403`, fallback `503` and `504`)
+  carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
 - **Metrics**: exported over OTLP to Prometheus. Three dashboards, versioned in `observability/grafana/dashboards` and
@@ -232,8 +233,12 @@ to `grafana/otel-lgtm`:
   2 minutes, calls rejected by an open circuit breaker for 2 minutes (a sustained outage under traffic). A
   half-open breaker alone is not alerted: without traffic it stays half-open after the downstream has recovered,
   which is not an incident. For the saga: an outbox not published for a minute (Kafka down), registrations waiting
-  for their seat for 2 minutes (event-service down or lagging), and any message sent to a dead letter topic. No contact point in development; production would route them
-  to the on-call channel.
+  for their seat for 2 minutes (event-service down or lagging), and any message sent to a dead letter topic.
+- **Alert routing** (`observability/grafana/notifications.yaml`): every alert goes to the e-mail contact point
+  "On-call e-mail", one notification per rule with every service it fires for; repeated every hour while a critical
+  alert fires, every 4 hours for a warning. Recipients in `ALERT_EMAIL_TO`, SMTP server in the `GRAFANA_SMTP_*`
+  variables of `.env` (off by default: the alerts then only show in Grafana). To check the delivery: Grafana,
+  **Alerting**, **Contact points**, "On-call e-mail", **Test**.
 
 ## API
 
@@ -322,7 +327,7 @@ Then start `discovery-server` first, followed by the other services. The aggrega
 (`http://localhost:8080/swagger-ui.html`), and each service also serves its own, for example
 `http://localhost:8083/swagger-ui/index.html`.
 
-The web application in development, with live reload (gateway on `localhost:8080`, Node.js 24):
+The web application in development, with live reload (gateway on `localhost:8080`, Node.js 26, the version of `.nvmrc`):
 
 ```bash
 cd frontend && npm ci && npm start       # http://localhost:4200, /api, /bff and the login paths proxied to the gateway
@@ -370,7 +375,7 @@ uploaded with the HTML report.
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (67 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (70 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -387,15 +392,18 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (67 c
   not pile up in the catalogue;
 - administration: every event listed (`scope=all`, refused to an organizer), registrations of any event with the names,
   a profile found by e-mail then erased, the event of an organizer cancelled (moderation);
-- resilience: `event-service` outage (a registration is still accepted and waits, gateway fallback), recovery after
+- resilience: `event-service` outage (a registration is still accepted and waits, gateway fallback `503` with its
+  trace id), recovery after
   restart (the waiting registration is confirmed), and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
-  `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
+  `event-service` and its SQL query, an error response of a service and of the gateway carries the id of its trace,
+  and the log of a request
   reaches Loki with its trace id;
 - dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
   dashboards read, are found in Prometheus.
 - business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, the
-  outbox of both services and the waiting registrations are measured, and the alert rules are loaded in Grafana.
+  outbox of both services and the waiting registrations are measured, the alert rules are loaded in Grafana and
+  routed to the e-mail contact point.
 
 ### Docker setup at a glance
 
@@ -415,10 +423,13 @@ Every merge to `main` and every `vX.Y.Z` tag publishes images for `linux/amd64` 
 Each image is scanned with Trivy (no fixable critical vulnerability) and carries an SBOM and build provenance.
 
 ```bash
-export IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.0
+export IMAGE_NAMESPACE=kardigue IMAGE_TAG=1.1
 docker compose --profile app pull
 docker compose --profile app up -d --no-build
+unset IMAGE_NAMESPACE IMAGE_TAG   # back to the local images for the next build
 ```
+
+Use the `compose.yaml` of the same version as the images (from 1.1, the platform needs Kafka).
 
 ### Stopping
 
@@ -521,8 +532,6 @@ pull request would change `main` directly and require merging `main` back into `
 - **Events created before ownership** (migration V3) have no organizer and can no longer be changed.
 - **`otel-lgtm` is a development backend**: one container, no persistence, default Grafana account. Production would
   run a collector and the backends separately (or send OTLP to a vendor).
-- **Errors raised by the gateway itself** (its 401 and its fallback `503`) do not carry the trace id yet; the gateway
-  logs do.
 - **Calls to Keycloak are not traced**: Spring Security fetches tokens and signing keys with its own HTTP clients.
 - **Incoming `traceparent` headers are trusted** at the edge; a public deployment would restart traces at the gateway.
 - **Client-side discovery**: after a restart, callers may get `503` for a few seconds, until Eureka and the load
@@ -538,5 +547,5 @@ pull request would change `main` directly and require merging `main` back into `
 |---|---|
 | **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end tests (Playwright, axe-core) (done) |
 | **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) (done); saga metrics, dashboard and alerts (done); HTTP seat route removed (done) |
-| **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
+| **1.2.0** | Issue #37 investigated and closed (done); trace id in the gateway's own errors (done); alerts routed by e-mail (done) |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

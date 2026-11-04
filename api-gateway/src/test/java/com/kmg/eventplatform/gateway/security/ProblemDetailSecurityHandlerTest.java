@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.security;
 
+import com.kmg.eventplatform.gateway.tracing.TracedExchanges;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -50,6 +51,16 @@ class ProblemDetailSecurityHandlerTest {
         assertThat(exchange.getResponse().getHeaders().getFirst("WWW-Authenticate"))
                 .isEqualTo("Bearer error=\"insufficient_scope\"");
         assertThat(exchange.getResponse().getBodyAsString().block()).contains("ACCESS_DENIED");
+    }
+
+    @Test
+    void problemCarriesTheIdOfTheTrace() {
+        MockServerWebExchange exchange = TracedExchanges.traced(exchange(), "4bf92f3577b34da6a3ce929d0e0e4736");
+
+        handler.commence(exchange, new AuthenticationCredentialsNotFoundException("Not Authenticated")).block();
+
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"");
     }
 
     @Test

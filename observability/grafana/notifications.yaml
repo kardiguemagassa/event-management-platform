@@ -1,0 +1,29 @@
+# Where the alerts of alerting.yaml go: one e-mail contact point, the root of the notification policy tree.
+# Provisioned at startup (mounted into otel-lgtm by compose.yaml). The recipients come from ALERT_EMAIL_TO and the
+# SMTP server from the GRAFANA_SMTP_* variables of .env: no address nor password in the repository. Without SMTP
+# (the default, and in CI) Grafana logs the notifications it cannot send; the alerts still show in Alerting.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: On-call e-mail
+    receivers:
+      - uid: event-platform-on-call-email
+        type: email
+        settings:
+          addresses: ${ALERT_EMAIL_TO}
+          # One e-mail to all the recipients, not one each.
+          singleEmail: true
+policies:
+  - orgId: 1
+    receiver: On-call e-mail
+    # One notification per alert rule, with every service it fires for.
+    group_by: [grafana_folder, alertname]
+    group_wait: 30s
+    group_interval: 5m
+    # A critical alert still firing is sent again every hour, a warning every 4 hours.
+    repeat_interval: 4h
+    routes:
+      - receiver: On-call e-mail
+        object_matchers:
+          - [severity, =, critical]
+        repeat_interval: 1h

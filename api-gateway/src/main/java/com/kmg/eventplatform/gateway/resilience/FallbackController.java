@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.gateway.resilience;
 
+import com.kmg.eventplatform.gateway.tracing.TraceIds;
 import io.swagger.v3.oas.annotations.Hidden;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +20,7 @@ import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.C
 
 /**
  * Target of the CircuitBreaker route filters ({@code forward:/fallback/unavailable}), for any HTTP method.
- * Turns a routing failure into an RFC 9457 problem with a stable code, like the services do.
+ * Turns a routing failure into an RFC 9457 problem with a stable code and the id of the trace, like the services do.
  */
 // Internal forward target of the CircuitBreaker filter, not a public endpoint.
 @Hidden
@@ -44,6 +45,7 @@ class FallbackController {
         if (originalPath != null) {
             problem.setInstance(URI.create(originalPath));
         }
+        TraceIds.addTo(problem, exchange);
 
         // Message only: a stack trace per failed request would flood the logs during an outage.
         log.warn("Routing of {} failed: {}", originalPath, String.valueOf(failure));

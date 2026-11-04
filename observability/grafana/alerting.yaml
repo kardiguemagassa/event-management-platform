@@ -1,6 +1,5 @@
 # Grafana alert rules of the platform, provisioned at startup (mounted into otel-lgtm by compose.yaml).
-# Evaluated by Grafana every 30 s and shown in Alerting > Alert rules. No contact point is configured in development:
-# production would route them to the on-call channel (Slack, PagerDuty, e-mail).
+# Evaluated by Grafana every 30 s and shown in Alerting > Alert rules; sent by e-mail (notifications.yaml).
 apiVersion: 1
 groups:
   - orgId: 1
