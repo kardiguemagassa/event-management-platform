@@ -35,7 +35,7 @@ class MessagingAutoConfigurationTest {
         runner.run(context -> {
             assertThat(context).hasSingleBean(Outbox.class).hasSingleBean(OutboxRelay.class)
                     .hasSingleBean(ProcessedMessages.class).hasSingleBean(MessageCodec.class)
-                    .hasSingleBean(DefaultErrorHandler.class);
+                    .hasSingleBean(DefaultErrorHandler.class).hasSingleBean(OutboxMetrics.class);
             assertThat(context.getBean(OutboxRelay.class).isAutoStartup()).isFalse();
             assertThat(context.getBean(OutboxRelay.class).isRunning()).isFalse();
         });

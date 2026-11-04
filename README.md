@@ -92,7 +92,8 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Idempotent seat reservation (reservation id = registration id) | A retried reserve or release never counts twice |
 | Transactional outbox with a polling publisher (`platform-messaging`) | A message is written in the transaction of its business change and published to Kafka afterwards: a crash in between loses nothing. Polling rather than Debezium: no Kafka Connect to run, ~200 ms of latency is enough here |
 | At-least-once delivery, idempotent consumers | The relay marks a message published only once Kafka has acknowledged it; consumers record each message id in the transaction of its effect, so a redelivery is a no-op |
-| Dead letter topic per topic | A message that keeps failing (two retries) or cannot be read leaves its partition instead of blocking it, with the exception in its headers |
+| Dead letter topic per topic | A message that keeps failing (two retries) or cannot be read leaves its partition instead of blocking it, with the exception in its headers; it is logged, counted and alerted |
+| A waiting registration is never expired | Its messages are durable and will be answered: expiring it could reject a registration whose seat is being reserved. A gauge counts the registrations waiting for more than a minute, and alerts |
 | Partial unique index on (event, user) for confirmed registrations | Duplicates are rejected by the database itself, even under concurrent requests (covered by a concurrency test) |
 | Retry, then circuit breaker, per downstream service | Fast transient failures are retried once; a failing service is cut off and answered with `503` in milliseconds. Business answers (`404`, `409`) are not failures |
 | "No instance available" ignored by the circuit breaker | No request is sent, so there is nothing to protect; counting it made recovery fail while discovery caught up ([#10](https://github.com/kardiguemagassa/event-management-platform/issues/10)) |
@@ -203,7 +204,9 @@ to `grafana/otel-lgtm`:
 - **Logs**: every line carries `[traceId-spanId]` on the console, and is sent to Loki with its trace and span ids
   (OpenTelemetry Logback appender, installed by `platform-observability`: no `logback-spring.xml` per service). In
   Grafana, **Explore**, data source **Loki**: `{service_name="registration-service"} | trace_id="<traceId>"`, or from a
-  trace in Tempo, the logs of a span. `registration-service` logs each confirmed and cancelled registration (ids only).
+  trace in Tempo, the logs of a span. `registration-service` logs each registration requested, confirmed, rejected and
+  cancelled (ids only), `event-service` each seat taken, refused and released: one trace follows a registration from
+  the `POST` to its answer, across Kafka (the `traceparent` of the request is stored with each outbox message).
 - **Errors**: every problem answered by a service carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
@@ -214,7 +217,10 @@ to `grafana/otel-lgtm`:
   - **Resilience**: state of every circuit breaker over time (closed, half-open, open), failure rate, calls rejected
     while open, gateway fallbacks and timeouts, downstream calls of `registration-service`;
   - **Business**: registrations confirmed, cancelled and rejected by reason (`EVENT_FULL`, `ALREADY_REGISTERED`...),
-    counted by `registration-service` (`registrations_*_total`).
+    counted by `registration-service` (`registrations_*_total`); and the **seat saga**: registrations waiting for their
+    seat for more than a minute (`registrations_pending_stale`), dead letters (`messaging_dead_letters_total`, by
+    topic), consumer lag, outbox backlog and age of its oldest message per service (`messaging_outbox_pending`,
+    `messaging_outbox_oldest_seconds`).
 
   Metrics are pushed every 10 s in compose (`OTEL_METRICS_STEP`), every minute by default.
 
@@ -224,7 +230,8 @@ to `grafana/otel-lgtm`:
 - **Alerts** (`observability/grafana/alerting.yaml`, Grafana **Alerting**): more than 5 % of 5xx on a service for
   2 minutes, calls rejected by an open circuit breaker for 2 minutes (a sustained outage under traffic). A
   half-open breaker alone is not alerted: without traffic it stays half-open after the downstream has recovered,
-  which is not an incident. No contact point in development; production would route them
+  which is not an incident. For the saga: an outbox not published for a minute (Kafka down), registrations waiting
+  for their seat for 2 minutes (event-service down or lagging), and any message sent to a dead letter topic. No contact point in development; production would route them
   to the on-call channel.
 
 ## API
@@ -384,8 +391,8 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (59 c
   reaches Loki with its trace id;
 - dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
   dashboards read, are found in Prometheus.
-- business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, and both
-  alert rules are loaded in Grafana.
+- business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, the
+  outbox of both services and the waiting registrations are measured, and the alert rules are loaded in Grafana.
 
 ### Docker setup at a glance
 

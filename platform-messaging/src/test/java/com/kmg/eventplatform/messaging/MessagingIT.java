@@ -1,5 +1,6 @@
 package com.kmg.eventplatform.messaging;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -86,6 +87,10 @@ class MessagingIT {
     @Autowired
     PoisonListener poisonListener;
     @Autowired
+    OutboxMetrics outboxMetrics;
+    @Autowired
+    SimpleMeterRegistry meterRegistry;
+    @Autowired
     PlatformTransactionManager transactionManager;
 
     JdbcClient jdbc;
@@ -127,6 +132,25 @@ class MessagingIT {
                 .contains(request.context().traceId());
         assertThat(unpublished()).isZero();
         assertThat(relay.relay()).isZero();
+    }
+
+    @Test
+    void theOutboxReportsWhatWaitsForKafka() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        outboxMetrics.bindTo(meters);
+        assertThat(meters.get(OutboxMetrics.PENDING).gauge().value()).isZero();
+        assertThat(meters.get(OutboxMetrics.OLDEST).gauge().value()).isZero();
+
+        transaction.executeWithoutResult(status -> {
+            outbox.enqueue(uniqueTopic(), "k", "T", new Sample("one"));
+            outbox.enqueue(uniqueTopic(), "k", "T", new Sample("two"));
+        });
+
+        assertThat(meters.get(OutboxMetrics.PENDING).gauge().value()).isEqualTo(2);
+        assertThat(meters.get(OutboxMetrics.OLDEST).gauge().value()).isGreaterThanOrEqualTo(0).isLessThan(60);
+        relay.relay();
+        assertThat(meters.get(OutboxMetrics.PENDING).gauge().value()).isZero();
+        assertThat(meters.get(OutboxMetrics.OLDEST).gauge().value()).isZero();
     }
 
     @Test
@@ -232,6 +256,8 @@ class MessagingIT {
         ConsumerRecord<String, String> dead = consumeKey(MessagingTopics.deadLetterOf(POISON_TOPIC), key);
         assertThat(dead.value()).isEqualTo(envelope);
         assertThat(poisonListener.attempts(key)).isEqualTo(3);
+        await().atMost(Duration.ofSeconds(10)).until(() -> meterRegistry
+                .counter(DeadLetterCounter.DEAD_LETTERS, DeadLetterCounter.TOPIC, POISON_TOPIC).count() >= 1);
     }
 
     @Test
@@ -339,6 +365,12 @@ class MessagingIT {
         @Bean
         PoisonListener poisonListener(MessageCodec codec) {
             return new PoisonListener(codec);
+        }
+
+        /** What the actuator provides in the services: dead letters are counted in it. */
+        @Bean
+        SimpleMeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
         }
     }
 

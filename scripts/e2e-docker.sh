@@ -56,7 +56,7 @@ call() {
   BODY=${out%$'\n'*}; local last=${out##*$'\n'}; CODE=${last% *}; TIME=${last#* }
   [ "$BODY" = "$out" ] && BODY=""
 }
-field() { python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get(sys.argv[2],""))' "$BODY" "$1" 2>/dev/null; }
+field() { python3 -c 'import json,sys;v=json.loads(sys.argv[1]).get(sys.argv[2]);print("" if v is None else v)' "$BODY" "$1" 2>/dev/null; }
 check() { # LABEL EXPECTED_STATUS [EXPECTED_CODE]
   local got_code=""; [ $# -ge 3 ] && got_code=$(field code)
   if [ "$CODE" = "$2" ] && { [ $# -lt 3 ] || [ "$got_code" = "$3" ]; }; then
@@ -351,6 +351,16 @@ RULES=$(curl -s http://127.0.0.1:3000/api/prometheus/grafana/api/v1/rules)
 [[ "$CONFIRMED" -ge 1 && "$FULL" -ge 1 && "$RULES" == *"Server errors above 5 %"* && "$RULES" == *"Circuit breaker rejecting calls"* ]] \
   && { PASS=$((PASS+1)); echo "PASS  business metrics (confirmed, rejected EVENT_FULL) and alert rules provisioned"; } \
   || { FAIL=$((FAIL+1)); echo "FAIL  business metrics ($CONFIRMED confirmed, $FULL EVENT_FULL) or alert rules: ${RULES:0:200}"; }
+# Health of the seat saga: the outbox of both services and the registrations waiting for their seat, with the alerts.
+for i in $(seq 1 20); do
+  OUTBOX=$(prom_series 'messaging_outbox_pending')
+  STALE=$(prom_series 'registrations_pending_stale{service_name="registration-service"}')
+  [ "$OUTBOX" -ge 2 ] && [ "$STALE" -ge 1 ] && break; sleep 2
+done
+[[ "$OUTBOX" -ge 2 && "$STALE" -ge 1 && "$RULES" == *"Outbox not published"* \
+   && "$RULES" == *"Registrations waiting for their seat"* && "$RULES" == *"Message sent to a dead letter topic"* ]] \
+  && { PASS=$((PASS+1)); echo "PASS  saga metrics (outbox of $OUTBOX services, registrations waiting) and their alert rules"; } \
+  || { FAIL=$((FAIL+1)); echo "FAIL  saga metrics (outbox: $OUTBOX series, waiting: $STALE) or alert rules"; }
 
 # Registering does not depend on event-service any more: the request waits in Kafka, and is answered on its return.
 echo "== Outage: event-service stopped"
@@ -379,6 +389,12 @@ echo "== No seat leaked"
 SEATS=$(field availableSeats)
 [ "$SEATS" = 0 ] && { PASS=$((PASS+1)); echo "PASS  availableSeats=0 (capacity 2, attendees 3 and 4 confirmed)"; } \
                  || { FAIL=$((FAIL+1)); echo "FAIL  availableSeats=$SEATS body=$BODY"; }
+
+# registration-service still calls event-service over HTTP (organizer of an event): it finds the restarted instance on
+# its own discovery schedule, independent of the gateway's.
+START=$(date +%s)
+for i in $(seq 1 30); do call GET "/api/registrations/events/$E"; [ "$CODE" = 200 ] && break; sleep 1; done
+check "registration-service reaches event-service again ($(( $(date +%s) - START ))s)" 200
 
 echo "== Right to erasure"
 AUTH=$(attendee_token 4) call DELETE /api/users/me; check "attendee 4 deletes their profile" 204
