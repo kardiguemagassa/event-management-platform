@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage: dependencies from the lockfile only (cached layer), then the production build.
-FROM --platform=$BUILDPLATFORM node:24-alpine AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS build
 WORKDIR /workspace
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
