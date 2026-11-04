@@ -322,7 +322,7 @@ Then start `discovery-server` first, followed by the other services. The aggrega
 (`http://localhost:8080/swagger-ui.html`), and each service also serves its own, for example
 `http://localhost:8083/swagger-ui/index.html`.
 
-The web application in development, with live reload (gateway on `localhost:8080`, Node.js 24):
+The web application in development, with live reload (gateway on `localhost:8080`, Node.js 26, the version of `.nvmrc`):
 
 ```bash
 cd frontend && npm ci && npm start       # http://localhost:4200, /api, /bff and the login paths proxied to the gateway
