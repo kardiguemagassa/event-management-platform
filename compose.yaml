@@ -186,11 +186,23 @@ services:
       - "127.0.0.1:4318:4318"                     # OTLP over HTTP, for services started from the IDE
       - "127.0.0.1:3200:3200"                     # Tempo API: traces by id (end-to-end test)
       - "127.0.0.1:3100:3100"                     # Loki API: logs of a trace (end-to-end test)
-    # The platform's dashboards and alert rules (observability/grafana), provisioned at startup ("Event Platform" folder).
+    # The platform's dashboards, alert rules and their routing (observability/grafana), provisioned at startup
+    # ("Event Platform" folder).
     volumes:
       - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform.yaml:ro
       - ./observability/grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/event-platform:ro
       - ./observability/grafana/alerting.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/event-platform.yaml:ro
+      - ./observability/grafana/notifications.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/event-platform-notifications.yaml:ro
+    # Alerts sent by e-mail (observability/grafana/notifications.yaml). SMTP is off unless .env turns it on.
+    environment:
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-on-call@example.invalid}
+      GF_SMTP_ENABLED: ${GRAFANA_SMTP_ENABLED:-false}
+      GF_SMTP_HOST: ${GRAFANA_SMTP_HOST:-}
+      GF_SMTP_USER: ${GRAFANA_SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${GRAFANA_SMTP_PASSWORD:-}
+      GF_SMTP_FROM_ADDRESS: ${GRAFANA_SMTP_FROM:-grafana@localhost}
+      GF_SMTP_FROM_NAME: Event Platform alerts
+      GF_SMTP_STARTTLS_POLICY: MandatoryStartTLS
     # The image's own health check, with a long start period: on a loaded machine Grafana alone took 170 s to start,
     # and `up --wait` reported the container unhealthy before it was ready.
     healthcheck:
