@@ -51,10 +51,11 @@ class OpenApiConfig {
                                         "You are not the organizer of event 3f2b8c1e-…",
                                         "/api/registrations/events/3f2b8c1e-…", "NOT_EVENT_ORGANIZER")))
                         .addResponses("Conflict", PlatformOpenApi.problem(
-                                "Business conflict (event full or not registrable, already registered, "
-                                        + "already cancelled, concurrent modification)",
-                                PlatformOpenApi.problemExample(409, "Conflict", "Event 3f2b8c1e-… is full",
-                                        "/api/registrations", "EVENT_FULL")))
+                                "Business conflict (already registered, already cancelled, rejected, "
+                                        + "concurrent modification)",
+                                PlatformOpenApi.problemExample(409, "Conflict",
+                                        "User 9b1deb4d-… is already registered to event 3f2b8c1e-…",
+                                        "/api/registrations", "ALREADY_REGISTERED")))
                         .addResponses("ServiceUnavailable", PlatformOpenApi.problem(
                                 "A dependent service is unavailable; the request can be retried",
                                 PlatformOpenApi.problemExample(503, "Service Unavailable",
@@ -78,9 +79,9 @@ class OpenApiConfig {
                 .addProperty("type", new StringSchema().example("about:blank"))
                 .addProperty("title", new StringSchema().example("Conflict"))
                 .addProperty("status", new IntegerSchema().example(409))
-                .addProperty("detail", new StringSchema().example("Event 3f2b8c1e-… has no seat left"))
+                .addProperty("detail", new StringSchema().example("User 9b1deb4d-… is already registered to event 3f2b8c1e-…"))
                 .addProperty("instance", new StringSchema().example("/api/registrations"))
-                .addProperty("code", new StringSchema().example("EVENT_FULL")
+                .addProperty("code", new StringSchema().example("ALREADY_REGISTERED")
                         .description("Stable machine-readable error code"));
     }
 }

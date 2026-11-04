@@ -9,17 +9,23 @@ import { firstValueFrom, map } from 'rxjs';
 import { EventsApi } from '../../api/events/events-api';
 import { get } from '../../api/events/fn/events/get';
 import { cancel } from '../../api/registrations/fn/registrations/cancel';
+import { get as getRegistration } from '../../api/registrations/fn/registrations/get';
 import { mine } from '../../api/registrations/fn/registrations/mine';
 import { register } from '../../api/registrations/fn/registrations/register';
 import { RegistrationResponse } from '../../api/registrations/models/registration-response';
 import { RegistrationsApi } from '../../api/registrations/registrations-api';
 import { Session } from '../../core/auth/session';
 import { ApiProblem, messageOf } from '../../core/http/api-problem';
+import { isActive } from '../../shared/registrations';
 import { valueOf } from '../../shared/resources';
 import { availability, seatsLeftLabel } from '../../shared/seats';
 
 /** What the visitor can do with this event, in order of precedence. */
-type Stage = 'cancelled' | 'draft' | 'past' | 'registered' | 'full' | 'open';
+type Stage = 'cancelled' | 'draft' | 'past' | 'pending' | 'registered' | 'full' | 'open';
+
+/** How often, and how long, a new registration is followed until event-service answers (usually in under a second). */
+export const FOLLOW_INTERVAL_MS = 500;
+export const FOLLOW_ATTEMPTS = 20;
 
 /**
  * One event and the visitor's place in it: register, or cancel one's registration. Anonymous visitors see the
@@ -47,15 +53,19 @@ export class EventDetailPage {
   });
 
   /**
-   * The visitor's active registration to this event; not asked for anonymous visitors. If this check fails, the
-   * page still offers to register: the API refuses a duplicate (ALREADY_REGISTERED), which reloads the check.
+   * The visitor's active registration to this event (PENDING or CONFIRMED): their latest one, if still active; not
+   * asked for anonymous visitors. If this check fails, the page still offers to register: the API refuses a
+   * duplicate (ALREADY_REGISTERED), which reloads the check.
    */
   protected readonly registration = rxResource({
     params: () => (this.session.authenticated() ? { eventId: this.id() } : undefined),
     stream: ({ params }) =>
-      this.registrationsApi
-        .invoke(mine, { eventId: params.eventId, status: 'CONFIRMED', size: 1 })
-        .pipe(map((page): RegistrationResponse | null => page.content?.[0] ?? null)),
+      this.registrationsApi.invoke(mine, { eventId: params.eventId, size: 1 }).pipe(
+        map((page): RegistrationResponse | null => {
+          const latest = page.content?.[0];
+          return latest && isActive(latest) ? latest : null;
+        }),
+      ),
   });
 
   protected readonly busy = signal(false);
@@ -83,8 +93,9 @@ export class EventDetailPage {
     if (event.startAt && new Date(event.startAt) < new Date()) {
       return 'past';
     }
-    if (valueOf(this.registration)) {
-      return 'registered';
+    const registration = valueOf(this.registration);
+    if (registration) {
+      return registration.status === 'PENDING' ? 'pending' : 'registered';
     }
     return this.seats()?.tone === 'full' ? 'full' : 'open';
   });
@@ -104,14 +115,52 @@ export class EventDetailPage {
     this.session.login(this.router.url);
   }
 
+  /**
+   * The seat is reserved asynchronously: the registration is accepted as PENDING, then followed until event-service
+   * confirms or refuses it.
+   */
   protected async register(): Promise<void> {
     await this.act(async () => {
-      const registration = await firstValueFrom(
+      const requested = await firstValueFrom(
         this.registrationsApi.invoke(register, { body: { eventId: this.id() } }),
       );
-      this.registration.set(registration);
-      this.notice.set('Inscription confirmée. À bientôt !');
+      this.registration.set(requested);
+      const answered = requested.id ? await this.follow(requested.id) : requested;
+      switch (answered.status) {
+        case 'CONFIRMED':
+          this.registration.set(answered);
+          this.notice.set('Inscription confirmée. À bientôt !');
+          break;
+        case 'REJECTED':
+          this.registration.set(null);
+          this.failure.set(messageOf(answered.rejectionReason ?? 'INTERNAL_ERROR'));
+          break;
+        default:
+          this.notice.set('Demande reçue : ton inscription sera confirmée dans quelques instants.');
+      }
     });
+  }
+
+  /** The registration once answered, or as it still is after the last attempt. */
+  private async follow(id: string): Promise<RegistrationResponse> {
+    let registration: RegistrationResponse = { id, status: 'PENDING' };
+    for (let attempt = 0; attempt < FOLLOW_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, FOLLOW_INTERVAL_MS));
+      }
+      registration = await firstValueFrom(this.registrationsApi.invoke(getRegistration, { id }));
+      if (registration.status !== 'PENDING') {
+        return registration;
+      }
+    }
+    return registration;
+  }
+
+  /** A registration left PENDING (page reloaded meanwhile): checks again. */
+  protected refresh(): void {
+    this.notice.set(null);
+    this.registration.reload();
+    this.event.reload();
   }
 
   protected async cancelRegistration(): Promise<void> {

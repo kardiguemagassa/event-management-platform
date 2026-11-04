@@ -14,7 +14,7 @@ import org.springframework.web.client.RestClient;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "eureka.client.enabled=false")
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, KafkaTestcontainersConfiguration.class})
 class ApiDocsIT {
 
     private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT =
@@ -40,7 +40,7 @@ class ApiDocsIT {
 
         Map<String, Object> register = (Map<String, Object>) ((Map<String, Object>) paths.get("/api/registrations"))
                 .get("post");
-        assertThat((Map<String, Object>) register.get("responses")).containsKeys("201", "400", "404", "409", "503");
+        assertThat((Map<String, Object>) register.get("responses")).containsOnlyKeys("202", "400", "401", "409");
 
         Map<String, Object> components = (Map<String, Object>) doc.get("components");
         Map<String, Object> securitySchemes = (Map<String, Object>) components.get("securitySchemes");

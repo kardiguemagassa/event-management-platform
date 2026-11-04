@@ -1,19 +1,16 @@
 package com.kmg.eventplatform.registration.infrastructure.client;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
-import org.springframework.web.client.RestClient.RequestHeadersSpec.ConvertibleClientHttpResponse;
 import org.springframework.web.client.RestClientException;
 
-import java.io.IOException;
 import java.net.ConnectException;
 import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * Shared handling of downstream calls and error responses (RFC 9457 ProblemDetail with a stable "code").
+ * Shared handling of downstream calls and of their unexpected answers.
  */
 final class DownstreamResponses {
 
@@ -37,11 +34,6 @@ final class DownstreamResponses {
         } catch (OAuth2AuthorizationException noToken) {
             throw new DownstreamUnavailableException(service, noToken);
         }
-    }
-
-    static String problemCode(ConvertibleClientHttpResponse response) throws IOException {
-        ProblemBody body = response.bodyTo(ProblemBody.class);
-        return body == null || body.code() == null ? "" : body.code();
     }
 
     /**
@@ -74,7 +66,4 @@ final class DownstreamResponses {
         return noAnswer;
     }
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record ProblemBody(String code) {
-    }
 }

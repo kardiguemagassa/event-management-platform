@@ -2,14 +2,14 @@ package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.DuplicateRegistrationException;
-import com.kmg.eventplatform.registration.application.EventFullException;
 import com.kmg.eventplatform.registration.application.EventNotFoundException;
-import com.kmg.eventplatform.registration.application.EventNotRegistrableException;
 import com.kmg.eventplatform.registration.application.RegistrationFailureException;
 import com.kmg.eventplatform.registration.application.RegistrationNotFoundException;
 import com.kmg.eventplatform.registration.application.NotEventOrganizerException;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
+import com.kmg.eventplatform.registration.domain.RegistrationRejectedException;
 import com.kmg.eventplatform.registration.domain.RegistrationRuleException;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
@@ -44,8 +44,6 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         HttpStatus status = switch (failure) {
             case EventNotFoundException notFound -> HttpStatus.NOT_FOUND;
             case RegistrationNotFoundException notFound -> HttpStatus.NOT_FOUND;
-            case EventFullException conflict -> HttpStatus.CONFLICT;
-            case EventNotRegistrableException conflict -> HttpStatus.CONFLICT;
             case DuplicateRegistrationException conflict -> HttpStatus.CONFLICT;
             case NotEventOrganizerException forbidden -> HttpStatus.FORBIDDEN;
             case DownstreamUnavailableException unavailable -> HttpStatus.SERVICE_UNAVAILABLE;
@@ -62,6 +60,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     ProblemDetail handleRule(RegistrationRuleException violation) {
         HttpStatus status = switch (violation) {
             case RegistrationAlreadyCancelledException conflict -> HttpStatus.CONFLICT;
+            case RegistrationRejectedException conflict -> HttpStatus.CONFLICT;
         };
         return problem(status, violation.code(), violation.getMessage());
     }
@@ -79,8 +78,8 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException invalid,
-                                                                  HttpHeaders headers, HttpStatusCode status,
-                                                                  WebRequest request) {
+                                                                  @NonNull HttpHeaders headers, @NonNull HttpStatusCode status,
+                                                                  @NonNull WebRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();
         for (FieldError fieldError : invalid.getBindingResult().getFieldErrors()) {
             errors.putIfAbsent(fieldError.getField(),
@@ -94,8 +93,8 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     /** A query or path parameter that does not convert to its type (unknown status, malformed id). */
     @Override
-    protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException mismatch, HttpHeaders headers,
-                                                        HttpStatusCode status, WebRequest request) {
+    protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException mismatch, @NonNull HttpHeaders headers,
+                                                        @NonNull HttpStatusCode status, @NonNull WebRequest request) {
         // For a request parameter (MethodArgumentTypeMismatchException), the property name is the parameter name.
         ProblemDetail body = problem(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "One or more fields are invalid");
         body.setTitle("Validation failed");

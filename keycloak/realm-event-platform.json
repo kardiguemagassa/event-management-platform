@@ -29,10 +29,6 @@
         "description": "Creates, publishes and cancels events"
       },
       {
-        "name": "SEAT_MANAGER",
-        "description": "Technical role: reserves and releases seats (registration-service only)"
-      },
-      {
         "name": "PROFILE_READER",
         "description": "Technical role: reads the display names of users (registration-service only)"
       },
@@ -179,7 +175,6 @@
       "enabled": true,
       "serviceAccountClientId": "registration-service",
       "realmRoles": [
-        "SEAT_MANAGER",
         "PROFILE_READER"
       ]
     }

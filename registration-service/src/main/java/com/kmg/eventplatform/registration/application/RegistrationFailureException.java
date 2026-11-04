@@ -5,7 +5,7 @@ package com.kmg.eventplatform.registration.application;
  * Sealed: the API layer maps every subtype with an exhaustive switch.
  */
 public sealed abstract class RegistrationFailureException extends RuntimeException
-        permits EventNotFoundException, EventFullException, EventNotRegistrableException,
+        permits EventNotFoundException,
         DownstreamUnavailableException, RegistrationNotFoundException, DuplicateRegistrationException,
         NotEventOrganizerException {
 

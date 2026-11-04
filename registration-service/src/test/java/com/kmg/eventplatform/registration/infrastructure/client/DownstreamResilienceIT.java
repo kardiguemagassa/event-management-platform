@@ -1,10 +1,11 @@
 package com.kmg.eventplatform.registration.infrastructure.client;
 
+import com.kmg.eventplatform.registration.KafkaTestcontainersConfiguration;
 import com.kmg.eventplatform.registration.TestcontainersConfiguration;
 import com.kmg.eventplatform.registration.application.AttendeeDirectory;
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
 import com.kmg.eventplatform.registration.application.EventCatalog;
-import com.kmg.eventplatform.registration.application.EventFullException;
+import com.kmg.eventplatform.registration.application.EventNotFoundException;
 import com.kmg.eventplatform.security.test.TestTokens;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.AfterAll;
@@ -35,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "registration.clients.circuit-breaker.sliding-window-size=4",
         "registration.clients.circuit-breaker.minimum-number-of-calls=4",
         "registration.clients.circuit-breaker.wait-duration-in-open-state=1m"})
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, KafkaTestcontainersConfiguration.class})
 class DownstreamResilienceIT {
 
     private static final FakeDownstream EVENT_SERVICE = FakeDownstream.start();
@@ -75,12 +76,12 @@ class DownstreamResilienceIT {
     void eventServiceCallsCarryTheServiceAccountToken() {
         int tokenRequestsBefore = TestTokens.tokenRequests();
 
-        events.exists(UUID.randomUUID());
-        events.exists(UUID.randomUUID());
+        events.organizerOf(UUID.randomUUID());
+        events.organizerOf(UUID.randomUUID());
 
         assertThat(EVENT_SERVICE.authorizations()).hasSize(2).allSatisfy(authorization -> {
             assertThat(authorization).startsWith("Bearer ");
-            assertThat(payload(authorization)).contains(TestTokens.SERVICE_ACCOUNT.toString(), "SEAT_MANAGER");
+            assertThat(payload(authorization)).contains(TestTokens.SERVICE_ACCOUNT.toString(), "PROFILE_READER");
         });
         // Cached by the authorized client manager: at most one token request, none if an earlier test got it.
         assertThat(TestTokens.tokenRequests() - tokenRequestsBefore).isLessThanOrEqualTo(1);
@@ -90,16 +91,16 @@ class DownstreamResilienceIT {
     void transientFailureIsRetriedOnce() {
         EVENT_SERVICE.answer(503, "");
 
-        assertThat(events.exists(UUID.randomUUID())).isTrue();
+        assertThat(events.organizerOf(UUID.randomUUID())).isEmpty();
         assertThat(EVENT_SERVICE.requests()).isEqualTo(2);
     }
 
     @Test
     void businessRejectionIsNeverRetried() {
-        EVENT_SERVICE.answer(409, "{\"status\":409,\"code\":\"EVENT_FULL\"}");
+        EVENT_SERVICE.answer(404, "{\"status\":404,\"code\":\"EVENT_NOT_FOUND\"}");
 
-        assertThatThrownBy(() -> events.reserveSeat(UUID.randomUUID(), UUID.randomUUID()))
-                .isInstanceOf(EventFullException.class);
+        assertThatThrownBy(() -> events.organizerOf(UUID.randomUUID()))
+                .isInstanceOf(EventNotFoundException.class);
         assertThat(EVENT_SERVICE.requests()).isEqualTo(1);
     }
 
@@ -107,7 +108,7 @@ class DownstreamResilienceIT {
     void readTimeoutIsNotRetried() {
         EVENT_SERVICE.answerSlowly(Duration.ofSeconds(3));
 
-        assertThatThrownBy(() -> events.exists(UUID.randomUUID()))
+        assertThatThrownBy(() -> events.organizerOf(UUID.randomUUID()))
                 .isInstanceOf(DownstreamUnavailableException.class);
         assertThat(EVENT_SERVICE.requests()).isEqualTo(1);
     }
@@ -117,7 +118,7 @@ class DownstreamResilienceIT {
         // Would fail if the default 1 s TimeLimiter of Spring Cloud CircuitBreaker were active.
         EVENT_SERVICE.answerSlowly(Duration.ofMillis(1200));
 
-        assertThat(events.exists(UUID.randomUUID())).isTrue();
+        assertThat(events.organizerOf(UUID.randomUUID())).isEmpty();
     }
 
     @Test
@@ -156,12 +157,12 @@ class DownstreamResilienceIT {
             EVENT_SERVICE.answer(503, "");
         }
         for (int i = 0; i < 4; i++) {
-            assertThatThrownBy(() -> events.exists(UUID.randomUUID()))
+            assertThatThrownBy(() -> events.organizerOf(UUID.randomUUID()))
                     .isInstanceOf(DownstreamUnavailableException.class);
         }
         assertThat(EVENT_SERVICE.requests()).isEqualTo(8);
 
-        assertThatThrownBy(() -> events.exists(UUID.randomUUID()))
+        assertThatThrownBy(() -> events.organizerOf(UUID.randomUUID()))
                 .isInstanceOf(DownstreamUnavailableException.class)
                 .hasMessageContaining("circuit breaker is open");
         assertThat(EVENT_SERVICE.requests()).isEqualTo(8);

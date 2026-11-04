@@ -13,6 +13,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,7 +38,7 @@ class RegistrationRepositoryTest {
     void persistsAssignedIdAsNewEntity() {
         UUID id = UUID.randomUUID();
 
-        repository.saveAndFlush(Registration.confirm(id, eventId, userId, NOW));
+        repository.saveAndFlush(Registrations.confirmed(id, eventId, userId, NOW));
 
         Registration found = repository.findById(id).orElseThrow();
         assertThat(found.getStatus()).isEqualTo(RegistrationStatus.CONFIRMED);
@@ -47,9 +48,9 @@ class RegistrationRepositoryTest {
     @Test
     void findsByEventAndByUserSortedByCreationDate() {
         UUID otherUser = UUID.randomUUID();
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, otherUser, NOW.plusSeconds(10)));
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, userId, NOW));
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), UUID.randomUUID(), userId, NOW.plusSeconds(20)));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), eventId, otherUser, NOW.plusSeconds(10)));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), UUID.randomUUID(), userId, NOW.plusSeconds(20)));
 
         PageRequest byDate = PageRequest.of(0, 10, Sort.by("createdAt"));
         Page<Registration> forEvent = repository.findByEventId(eventId, byDate);
@@ -61,11 +62,11 @@ class RegistrationRepositoryTest {
 
     @Test
     void findsTheRegistrationsOfAnEventByStatus() {
-        Registration cancelled = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        Registration cancelled = Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW);
         cancelled.cancel(NOW.plusSeconds(5));
         repository.saveAndFlush(cancelled);
         Registration confirmed = repository.saveAndFlush(
-                Registration.confirm(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW.plusSeconds(10)));
+                Registrations.confirmed(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW.plusSeconds(10)));
 
         PageRequest page = PageRequest.of(0, 10);
         assertThat(repository.findByEventIdAndStatus(eventId, RegistrationStatus.CONFIRMED, page).getContent())
@@ -76,13 +77,13 @@ class RegistrationRepositoryTest {
 
     @Test
     void findsTheCallersRegistrationToOneEventInOneStatus() {
-        Registration cancelled = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        Registration cancelled = Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW);
         cancelled.cancel(NOW.plusSeconds(5));
         repository.saveAndFlush(cancelled);
         Registration active = repository.saveAndFlush(
-                Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(10)));
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), UUID.randomUUID(), userId, NOW));
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW));
+                Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(10)));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), UUID.randomUUID(), userId, NOW));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW));
 
         Specification<Registration> mineToThisEvent = Specification.allOf(
                 RegistrationSpecifications.ofUser(userId), RegistrationSpecifications.forEvent(eventId));
@@ -97,34 +98,65 @@ class RegistrationRepositoryTest {
 
     @Test
     void detectsActiveRegistrationOnly() {
-        Registration registration = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        Set<RegistrationStatus> active = Set.of(RegistrationStatus.PENDING, RegistrationStatus.CONFIRMED);
+        Registration registration = Registration.request(UUID.randomUUID(), eventId, userId, NOW);
         repository.saveAndFlush(registration);
-        assertThat(repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED)).isTrue();
+        assertThat(repository.existsByEventIdAndUserIdAndStatusIn(eventId, userId, active)).as("pending").isTrue();
 
         registration.cancel(NOW.plusSeconds(60));
         repository.saveAndFlush(registration);
 
-        assertThat(repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED)).isFalse();
+        assertThat(repository.existsByEventIdAndUserIdAndStatusIn(eventId, userId, active)).isFalse();
     }
 
     @Test
     void databaseRejectsSecondActiveRegistration() {
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, userId, NOW));
+        repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, userId, NOW));
 
         assertThatThrownBy(() -> repository.saveAndFlush(
-                Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(1))))
+                Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(1))))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("uq_registrations_active_event_user");
     }
 
     @Test
+    void aRejectedRegistrationKeepsItsReasonAndFreesTheWayToRegisterAgain() {
+        Registration rejected = Registration.request(UUID.randomUUID(), eventId, userId, NOW);
+        rejected.rejectSeat("EVENT_FULL");
+        repository.saveAndFlush(rejected);
+
+        repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(60)));
+
+        assertThat(repository.findById(rejected.getId()).orElseThrow().getRejectionReason()).isEqualTo("EVENT_FULL");
+    }
+
+    @Test
+    void countsTheRegistrationsWaitingSinceBeforeAnInstant() {
+        repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, userId, NOW));
+        repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW.plusSeconds(120)));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), eventId, UUID.randomUUID(), NOW));
+
+        assertThat(repository.countByStatusAndCreatedAtBefore(RegistrationStatus.PENDING, NOW.plusSeconds(60)))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void databaseRejectsRejectedRowWithoutReason() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO registrations (id, event_id, user_id, status, created_at) VALUES (?, ?, ?, 'REJECTED', now())",
+                UUID.randomUUID(), eventId, userId))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_registrations_rejection_reason");
+    }
+
+    @Test
     void userCanRegisterAgainAfterCancelling() {
-        Registration first = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        Registration first = Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW);
         repository.saveAndFlush(first);
         first.cancel(NOW.plusSeconds(60));
         repository.saveAndFlush(first);
 
-        repository.saveAndFlush(Registration.confirm(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(120)));
+        repository.saveAndFlush(Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW.plusSeconds(120)));
 
         assertThat(repository.findByEventId(eventId, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(2);
     }

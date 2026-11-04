@@ -105,6 +105,15 @@
           @case ('full') {
             <button mat-flat-button type="button" disabled>Complet</button>
           }
+          @case ('pending') {
+            <div class="banner info pending" role="status">
+              Inscription en cours : ta place est en train d'être réservée.
+              <mat-progress-bar mode="indeterminate" aria-label="Inscription en cours" />
+            </div>
+            @if (!busy()) {
+              <button mat-stroked-button type="button" (click)="refresh()">Actualiser</button>
+            }
+          }
           @case ('registered') {
             <p class="banner success">
               <mat-icon svgIcon="registrations" aria-hidden="true" />

@@ -1,13 +1,14 @@
 package com.kmg.eventplatform.registration.api;
 
 import com.kmg.eventplatform.registration.application.DownstreamUnavailableException;
-import com.kmg.eventplatform.registration.application.EventFullException;
 import com.kmg.eventplatform.registration.application.EventRegistration;
 import com.kmg.eventplatform.registration.application.NotEventOrganizerException;
 import com.kmg.eventplatform.registration.application.RegistrationNotFoundException;
 import com.kmg.eventplatform.registration.application.RegistrationService;
 import com.kmg.eventplatform.registration.domain.Registration;
+import com.kmg.eventplatform.registration.domain.Registrations;
 import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
+import com.kmg.eventplatform.registration.domain.RegistrationRejectedException;
 import com.kmg.eventplatform.registration.domain.RegistrationStatus;
 import com.kmg.eventplatform.registration.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,7 +81,7 @@ class RegistrationControllerTest {
 
     private final UUID eventId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
-    private final Registration registration = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+    private final Registration registration = Registration.request(UUID.randomUUID(), eventId, userId, NOW);
 
     @BeforeEach
     void authenticateEveryRequest() {
@@ -118,7 +119,7 @@ class RegistrationControllerTest {
         mockMvc.perform(post("/api/registrations")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"eventId\":\"" + eventId + "\",\"userId\":\"" + someoneElse + "\"}"))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.userId").value(userId.toString()));
     }
 
@@ -196,15 +197,38 @@ class RegistrationControllerTest {
     }
 
     @Test
-    void registerReturnsCreatedWithLocation() throws Exception {
+    void registerIsAcceptedPendingWithTheLocationToFollow() throws Exception {
         when(service.register(eventId, userId)).thenReturn(registration);
 
         register(eventId)
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(header().string("Location", endsWith("/api/registrations/" + registration.getId())))
                 .andExpect(jsonPath("$.id").value(registration.getId().toString()))
-                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.rejectionReason").value(nullValue()))
                 .andExpect(jsonPath("$.cancelledAt").value(nullValue()));
+    }
+
+    @Test
+    void aRejectedRegistrationCarriesItsReason() throws Exception {
+        Registration rejected = Registration.request(UUID.randomUUID(), eventId, userId, NOW);
+        rejected.rejectSeat("EVENT_FULL");
+        when(service.get(rejected.getId(), userId)).thenReturn(rejected);
+
+        mockMvc.perform(get("/api/registrations/{id}", rejected.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.rejectionReason").value("EVENT_FULL"));
+    }
+
+    @Test
+    void cancellingARejectedRegistrationIsAConflict() throws Exception {
+        when(service.cancel(registration.getId(), userId))
+                .thenThrow(new RegistrationRejectedException(registration.getId()));
+
+        mockMvc.perform(post("/api/registrations/{id}/cancel", registration.getId()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REGISTRATION_REJECTED"));
     }
 
     @Test
@@ -213,15 +237,6 @@ class RegistrationControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.errors.eventId").exists());
-    }
-
-    @Test
-    void fullEventIsAConflict() throws Exception {
-        when(service.register(eventId, userId)).thenThrow(new EventFullException(eventId));
-
-        register(eventId)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("EVENT_FULL"));
     }
 
     @Test
@@ -262,7 +277,7 @@ class RegistrationControllerTest {
 
     @Test
     void cancelReturnsCancelledRegistration() throws Exception {
-        Registration cancelled = Registration.confirm(UUID.randomUUID(), eventId, userId, NOW);
+        Registration cancelled = Registrations.confirmed(UUID.randomUUID(), eventId, userId, NOW);
         cancelled.cancel(NOW.plusSeconds(60));
         when(service.cancel(cancelled.getId(), userId)).thenReturn(cancelled);
 
@@ -319,7 +334,7 @@ class RegistrationControllerTest {
 
     @Test
     void listByEventRejectsUnknownStatus() throws Exception {
-        mockMvc.perform(get("/api/registrations/events/{eventId}", eventId).param("status", "PENDING"))
+        mockMvc.perform(get("/api/registrations/events/{eventId}", eventId).param("status", "WAITLISTED"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.errors.status").exists());

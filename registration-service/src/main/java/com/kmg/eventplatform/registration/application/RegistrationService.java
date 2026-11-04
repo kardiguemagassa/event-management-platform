@@ -1,7 +1,6 @@
 package com.kmg.eventplatform.registration.application;
 
 import com.kmg.eventplatform.registration.domain.Registration;
-import com.kmg.eventplatform.registration.domain.RegistrationAlreadyCancelledException;
 import com.kmg.eventplatform.registration.domain.RegistrationRepository;
 import com.kmg.eventplatform.registration.domain.RegistrationStatus;
 import org.slf4j.Logger;
@@ -12,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -29,92 +29,119 @@ import static com.kmg.eventplatform.registration.domain.RegistrationSpecificatio
  * Registers the authenticated user to an event of event-service. The attendee is the caller identified by
  * the access token (never an id sent in the request), and a registration is private to its attendee.
  * <p>
- * Deliberately not {@code @Transactional}: no database connection is held during remote calls.
- * Each repository write runs in its own short transaction, and remote side effects are undone by compensation.
+ * The seat is reserved asynchronously (saga over Kafka): registering writes a PENDING registration and the seat
+ * request in one local transaction, and event-service's answer confirms or rejects it later. No remote call is made
+ * while registering or cancelling: both work while event-service is down, and nothing is lost if this service stops.
  */
 @Service
 public class RegistrationService {
 
     private static final Logger log = LoggerFactory.getLogger(RegistrationService.class);
 
-    /** Partial unique index of migration V2. */
+    /** Partial unique index of migrations V2 and V3. */
     static final String ACTIVE_REGISTRATION_INDEX = "uq_registrations_active_event_user";
+    private static final Set<RegistrationStatus> ACTIVE =
+            Set.of(RegistrationStatus.PENDING, RegistrationStatus.CONFIRMED);
+    private static final String ALREADY_REGISTERED = "ALREADY_REGISTERED";
 
     private final RegistrationRepository repository;
     private final EventCatalog events;
+    private final SeatRequests seats;
     private final Clock clock;
     private final RegistrationMetrics metrics;
     private final AttendeeDirectory attendeeDirectory;
 
-    public RegistrationService(RegistrationRepository repository, EventCatalog events, Clock clock,
+    public RegistrationService(RegistrationRepository repository, EventCatalog events, SeatRequests seats, Clock clock,
                                RegistrationMetrics metrics, AttendeeDirectory attendeeDirectory) {
         this.repository = repository;
         this.events = events;
+        this.seats = seats;
         this.clock = clock;
         this.metrics = metrics;
         this.attendeeDirectory = attendeeDirectory;
     }
 
     /**
-     * Counted: confirmed, or rejected with the code of the failure (event full, already registered, downstream
-     * unavailable...).
+     * Requests a seat: the registration is PENDING until event-service answers. An unknown, closed or full event is
+     * known only then, as a REJECTED registration with its reason.
      *
      * @param userId the authenticated attendee, from the access token
+     * @throws DuplicateRegistrationException if the caller already has an active registration to this event
      */
+    @Transactional
     public Registration register(UUID eventId, UUID userId) {
+        // Fast path with a clear error. Not a guarantee under concurrency: the unique index is, and is translated below.
+        if (repository.existsByEventIdAndUserIdAndStatusIn(eventId, userId, ACTIVE)) {
+            throw duplicate(eventId, userId);
+        }
+        Registration requested;
         try {
-            Registration confirmed = confirm(eventId, userId);
-            metrics.confirmed();
-            return confirmed;
-        } catch (RegistrationFailureException rejected) {
-            metrics.rejected(rejected.code());
-            throw rejected;
-        }
-    }
-
-    private Registration confirm(UUID eventId, UUID userId) {
-        if (!events.exists(eventId)) {
-            throw new EventNotFoundException(eventId);
-        }
-        // Fast path with a clear error and no remote side effect. Not a guarantee under concurrency:
-        // the unique index is, and is translated below.
-        if (repository.existsByEventIdAndUserIdAndStatus(eventId, userId, RegistrationStatus.CONFIRMED)) {
-            throw new DuplicateRegistrationException(eventId, userId);
-        }
-
-        // Generated before any side effect: it is the idempotency key of the seat reservation.
-        UUID registrationId = UUID.randomUUID();
-        reserveSeat(eventId, registrationId);
-        try {
-            Registration confirmed =
-                    repository.saveAndFlush(Registration.confirm(registrationId, eventId, userId, clock.instant()));
-            // Ids only, no personal data: the audit trail of the saga, correlated with its trace in Grafana.
-            log.info("Registration {} confirmed on event {}", registrationId, eventId);
-            return confirmed;
-        } catch (RuntimeException saveFailure) {
-            releaseSeatQuietly(eventId, registrationId, saveFailure);
+            requested = repository.saveAndFlush(Registration.request(UUID.randomUUID(), eventId, userId, clock.instant()));
+        } catch (DataIntegrityViolationException saveFailure) {
             if (isActiveRegistrationConflict(saveFailure)) {
-                throw new DuplicateRegistrationException(eventId, userId);
+                throw duplicate(eventId, userId);
             }
             throw saveFailure;
         }
+        seats.reserve(eventId, requested.getId());
+        // Ids only, no personal data: the audit trail of the saga, correlated with its trace in Grafana.
+        log.info("Registration {} requested on event {}", requested.getId(), eventId);
+        return requested;
     }
 
     /**
-     * The seat is released first: if event-service is down, the registration stays CONFIRMED
-     * and the client can retry safely, since releasing is idempotent.
+     * The registration is cancelled at once; its seat is released asynchronously, after the reservation if that is
+     * still on its way.
      */
+    @Transactional
     public Registration cancel(UUID registrationId, UUID userId) {
         Registration registration = get(registrationId, userId);
-        if (registration.isCancelled()) {
-            throw new RegistrationAlreadyCancelledException(registrationId);
-        }
-        events.releaseSeat(registration.getEventId(), registration.getId());
         registration.cancel(clock.instant());
         Registration cancelled = repository.saveAndFlush(registration);
+        seats.release(cancelled.getEventId(), cancelled.getId());
         metrics.cancelled();
-        log.info("Registration {} cancelled on event {}", registrationId, registration.getEventId());
+        log.info("Registration {} cancelled on event {}", registrationId, cancelled.getEventId());
         return cancelled;
+    }
+
+    /**
+     * Answer of event-service: the seat is held. Ignored when the registration no longer waits for it (cancelled
+     * meanwhile: its release is already queued behind the reservation).
+     */
+    @Transactional
+    public void seatReserved(UUID registrationId) {
+        repository.findById(registrationId).ifPresentOrElse(registration -> {
+            if (registration.confirmSeat()) {
+                metrics.confirmed();
+                log.info("Registration {} confirmed on event {}", registrationId, registration.getEventId());
+            } else {
+                log.info("Seat reserved for registration {} ignored: it is {}", registrationId,
+                        registration.getStatus());
+            }
+        }, () -> log.warn("Seat reserved for unknown registration {}", registrationId));
+    }
+
+    /**
+     * Answer of event-service: the seat is refused (event full, closed or unknown).
+     *
+     * @param reason the code of the refusal, counted as the rejection reason
+     */
+    @Transactional
+    public void seatRejected(UUID registrationId, String reason) {
+        repository.findById(registrationId).ifPresentOrElse(registration -> {
+            if (registration.rejectSeat(reason)) {
+                metrics.rejected(reason);
+                log.info("Registration {} rejected on event {}: {}", registrationId, registration.getEventId(), reason);
+            } else {
+                log.info("Seat refusal for registration {} ignored: it is {}", registrationId,
+                        registration.getStatus());
+            }
+        }, () -> log.warn("Seat refusal for unknown registration {}", registrationId));
+    }
+
+    private DuplicateRegistrationException duplicate(UUID eventId, UUID userId) {
+        metrics.rejected(ALREADY_REGISTERED);
+        return new DuplicateRegistrationException(eventId, userId);
     }
 
     /**
@@ -163,7 +190,7 @@ public class RegistrationService {
 
     /**
      * The caller's registrations, optionally for one event and in one status: "am I registered to this event?" is
-     * {@code eventId} with {@code CONFIRMED}.
+     * {@code eventId}, newest first, the first one being PENDING or CONFIRMED.
      */
     public Page<Registration> findByUser(UUID userId, UUID eventId, RegistrationStatus status, Pageable pageable) {
         List<Specification<Registration>> criteria = new ArrayList<>();
@@ -191,36 +218,8 @@ public class RegistrationService {
         }
     }
 
-    /**
-     * A timeout does not tell whether event-service committed the reservation: release it to be sure.
-     */
-    private void reserveSeat(UUID eventId, UUID registrationId) {
-        try {
-            events.reserveSeat(eventId, registrationId);
-        } catch (DownstreamUnavailableException unknownOutcome) {
-            releaseSeatQuietly(eventId, registrationId, unknownOutcome);
-            throw unknownOutcome;
-        }
-    }
-
-    private static boolean isActiveRegistrationConflict(RuntimeException failure) {
-        if (!(failure instanceof DataIntegrityViolationException)) {
-            return false;
-        }
+    private static boolean isActiveRegistrationConflict(DataIntegrityViolationException failure) {
         String message = NestedExceptionUtils.getMostSpecificCause(failure).getMessage();
         return message != null && message.contains(ACTIVE_REGISTRATION_INDEX);
-    }
-
-    /**
-     * Best-effort compensation: never hides the original failure.
-     */
-    private void releaseSeatQuietly(UUID eventId, UUID registrationId, RuntimeException originalFailure) {
-        try {
-            events.releaseSeat(eventId, registrationId);
-        } catch (RuntimeException releaseFailure) {
-            originalFailure.addSuppressed(releaseFailure);
-            log.error("Compensation failed: seat of reservation {} on event {} may still be held",
-                    registrationId, eventId, releaseFailure);
-        }
     }
 }

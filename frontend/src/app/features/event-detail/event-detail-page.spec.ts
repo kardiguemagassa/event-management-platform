@@ -17,7 +17,7 @@ import { provideRegistrationsApiConfiguration } from '../../api/registrations/re
 import { Session } from '../../core/auth/session';
 import { problemInterceptor } from '../../core/http/problem.interceptor';
 import { provideIcons } from '../../core/ui/icons';
-import { EventDetailPage } from './event-detail-page';
+import { EventDetailPage, FOLLOW_ATTEMPTS, FOLLOW_INTERVAL_MS } from './event-detail-page';
 
 registerLocaleData(localeFr);
 
@@ -32,6 +32,7 @@ const EVENT: EventResponse = {
   status: 'PUBLISHED',
 };
 const REGISTRATION: RegistrationResponse = { id: 'r1', eventId: 'e1', status: 'CONFIRMED' };
+const PENDING: RegistrationResponse = { ...REGISTRATION, status: 'PENDING' };
 
 describe('EventDetailPage', () => {
   let harness: RouterTestingHarness;
@@ -83,6 +84,10 @@ describe('EventDetailPage', () => {
     return backend.expectOne((request) => request.url === '/api/registrations/me');
   }
 
+  function expectFollow(): TestRequest {
+    return backend.expectOne('/api/registrations/r1');
+  }
+
   async function open(
     event: EventResponse,
     registration?: RegistrationResponse | null,
@@ -113,7 +118,8 @@ describe('EventDetailPage', () => {
     expectEvent().flush(EVENT);
     const mine = expectMine();
     expect(mine.request.params.get('eventId')).toBe('e1');
-    expect(mine.request.params.get('status')).toBe('CONFIRMED');
+    expect(mine.request.params.get('size')).toBe('1');
+    expect(mine.request.params.has('status')).toBe(false);
     mine.flush({ content: [] });
     await elapse();
 
@@ -121,7 +127,10 @@ describe('EventDetailPage', () => {
     const registering = backend.expectOne('/api/registrations');
     expect(registering.request.method).toBe('POST');
     expect(registering.request.body).toEqual({ eventId: 'e1' });
-    registering.flush(REGISTRATION);
+    registering.flush(PENDING, { status: 202, statusText: 'Accepted' });
+    await elapse();
+    expect(text('.actions [role="status"]')).toContain('Inscription en cours');
+    expectFollow().flush(REGISTRATION);
     await elapse();
     expectEvent().flush({ ...EVENT, reservedSeats: 149 });
     await elapse();
@@ -159,9 +168,9 @@ describe('EventDetailPage', () => {
     await open({ ...EVENT, reservedSeats: 199 }, null);
 
     button("S'inscrire").click();
-    backend
-      .expectOne('/api/registrations')
-      .flush({ code: 'EVENT_FULL' }, { status: 409, statusText: '' });
+    backend.expectOne('/api/registrations').flush(PENDING, { status: 202, statusText: 'Accepted' });
+    await elapse();
+    expectFollow().flush({ ...REGISTRATION, status: 'REJECTED', rejectionReason: 'EVENT_FULL' });
     await elapse();
     expectEvent().flush({ ...EVENT, reservedSeats: 200 });
     await elapse();
@@ -185,6 +194,47 @@ describe('EventDetailPage', () => {
 
     expect(text('.feedback [role="alert"]')).toBe('Tu es déjà inscrit à cet événement.');
     expect(button('Annuler mon inscription')).toBeDefined();
+  });
+
+  it('follows a registration until its answer, then says it is on its way', async () => {
+    authenticated.set(true);
+    await open(EVENT, null);
+    vi.useFakeTimers();
+    try {
+      button("S'inscrire").click();
+      backend
+        .expectOne('/api/registrations')
+        .flush(PENDING, { status: 202, statusText: 'Accepted' });
+      for (let attempt = 0; attempt < FOLLOW_ATTEMPTS; attempt++) {
+        await vi.advanceTimersByTimeAsync(attempt === 0 ? 0 : FOLLOW_INTERVAL_MS);
+        expectFollow().flush(PENDING);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      expectEvent().flush(EVENT);
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    harness.detectChanges();
+
+    expect(text('.feedback [role="status"]')).toBe(
+      'Demande reçue : ton inscription sera confirmée dans quelques instants.',
+    );
+    expect(text('.actions [role="status"]')).toContain('Inscription en cours');
+
+    button('Actualiser').click();
+    await elapse();
+    expectMine().flush({ content: [REGISTRATION] });
+    expectEvent().flush({ ...EVENT, reservedSeats: 149 });
+    await elapse();
+    expect(text('.actions .banner')).toBe('Tu es inscrit à cet événement.');
+  });
+
+  it('ignores a latest registration that is no longer active', async () => {
+    authenticated.set(true);
+    await open(EVENT, { ...REGISTRATION, status: 'REJECTED', rejectionReason: 'EVENT_FULL' });
+
+    expect(button("S'inscrire")).toBeDefined();
   });
 
   it('still offers to register when the registration check fails', async () => {

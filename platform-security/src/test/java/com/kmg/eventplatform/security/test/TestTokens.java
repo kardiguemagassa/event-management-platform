@@ -50,7 +50,7 @@ public final class TestTokens {
         return baseUrl() + "/certs";
     }
 
-    /** Token endpoint for client credentials: always grants a SEAT_MANAGER token to the service account. */
+    /** Token endpoint for client credentials: always grants a PROFILE_READER token to the service account. */
     public static String tokenUri() {
         return baseUrl() + "/token";
     }
@@ -130,7 +130,7 @@ public final class TestTokens {
             server.createContext("/token", exchange -> {
                 TOKEN_REQUESTS.incrementAndGet();
                 exchange.getRequestBody().readAllBytes();
-                respond(exchange, "{\"access_token\":\"" + forUser(SERVICE_ACCOUNT, "SEAT_MANAGER")
+                respond(exchange, "{\"access_token\":\"" + forUser(SERVICE_ACCOUNT, "PROFILE_READER")
                         + "\",\"token_type\":\"Bearer\",\"expires_in\":300}");
             });
             server.start();

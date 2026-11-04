@@ -101,18 +101,35 @@ describe('MyRegistrationsPage', () => {
     await elapse();
   }
 
-  it('reads the confirmed registrations, then their events in one call', async () => {
+  it('reads the active registrations, then their events in one call', async () => {
     await harness.navigateByUrl('/mes-inscriptions');
     const mine = expectMine();
-    expect(mine.request.params.get('status')).toBe('CONFIRMED');
+    expect(mine.request.params.has('status')).toBe(false);
     expect(mine.request.params.get('size')).toBe('100');
-    mine.flush({ content: REGISTRATIONS });
+    mine.flush({
+      content: [
+        ...REGISTRATIONS,
+        { id: 'r4', eventId: 'e4', status: 'CANCELLED' },
+        { id: 'r5', eventId: 'e5', status: 'REJECTED', rejectionReason: 'EVENT_FULL' },
+      ],
+    });
     await elapse();
 
     const events = expectEvents();
     expect(events.request.params.getAll('ids')).toEqual(['e1', 'e2', 'e3']);
     expect(events.request.params.get('size')).toBe('100');
     events.flush({ content: [UPCOMING, CANCELLED, PAST] });
+  });
+
+  it('shows a registration waiting for its seat', async () => {
+    await harness.navigateByUrl('/mes-inscriptions');
+    expectMine().flush({ content: [{ ...REGISTRATIONS[0], status: 'PENDING' }] });
+    await elapse();
+    expectEvents().flush({ content: [UPCOMING] });
+    await elapse();
+
+    const badges = [...view().querySelectorAll('.badge')].map((badge) => badge.textContent?.trim());
+    expect(badges).toEqual(['En attente']);
   });
 
   it('shows the upcoming ones by default, with the count of each period', async () => {

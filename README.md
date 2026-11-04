@@ -16,11 +16,13 @@ GitHub Actions.
 | `api-gateway` | Single entry point: token validation, routing, circuit breakers with fallback, one Swagger UI for every service |
 | `discovery-server` | Eureka registry: services find each other by name |
 | `user-service` | Application profiles of the users (`/api/users/me`), keyed by their Keycloak id |
-| `event-service` | Events, their lifecycle (draft, published, cancelled), their organizer and capacity, with idempotent seat reservation |
-| `registration-service` | Registers the authenticated user to an event, reserving a seat in `event-service` with its own service account |
+| `event-service` | Events, their lifecycle (draft, published, cancelled), their organizer and capacity, with idempotent seat reservation (seat commands from Kafka, answered through its outbox) |
+| `registration-service` | Registers the authenticated user to an event: the seat is requested from `event-service` through Kafka (saga with a transactional outbox), the registration confirmed or rejected by its answer |
 | `keycloak` | Identity provider: sign-up and login, roles, access tokens (realm `event-platform`) |
 | `platform-security` | Shared library (not a service): resource server setup of the servlet services, test token helpers |
 | `platform-observability` | Shared library (not a service): OpenTelemetry tracing without the noise, trace id in error responses |
+| `platform-messaging` | Shared library (not a service): transactional outbox published to Kafka, idempotent consumption, dead letter topics |
+| `kafka` | Message broker of the registration saga (KRaft, one node in development) |
 | `otel-lgtm` | Observability backend for development: OpenTelemetry collector, Tempo (traces), Prometheus (metrics), Loki, Grafana |
 
 ## Architecture
@@ -43,7 +45,11 @@ flowchart LR
 
     web -->|"/api, /bff, login<br/>(session cookie)"| gateway
     gateway -->|"token relayed"| users & events & registrations
-    registrations -->|"service account token:<br/>event, organizer, reserve / release seat"| events
+    registrations -->|"service account token:<br/>organizer of an event"| events
+    registrations -->|"ReserveSeat, ReleaseSeat<br/>(outbox)"| kafka[(Kafka)]
+    kafka -->|"seat commands"| events
+    events -->|"SeatReserved, SeatRejected<br/>(outbox)"| kafka
+    kafka -->|"seat replies"| registrations
     registrations -.->|"client credentials"| keycloak
     gateway -.->|"signing keys (JWKS)"| keycloak
     users & events & registrations -.-> keycloak
@@ -68,6 +74,7 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Language and framework | Java 21, Spring Boot 4.1, Spring MVC (virtual threads) and Spring WebFlux (gateway) |
 | Microservices | Spring Cloud 2025.1: Gateway, Netflix Eureka, LoadBalancer, CircuitBreaker (Resilience4j) |
 | Persistence | PostgreSQL 18, Spring Data JPA (Hibernate 7), Flyway |
+| Messaging | Apache Kafka 4 (KRaft), Spring for Apache Kafka, transactional outbox (polling publisher) |
 | API | REST, RFC 9457 problem details, OpenAPI 3 (springdoc), Bean Validation |
 | Security | Keycloak 26 (OpenID Connect), Spring Security 7: OAuth2 resource server (JWT, RS256) and OAuth2 client (client credentials) |
 | Observability | OpenTelemetry (Spring Boot starter, Micrometer Tracing), W3C trace context, OTLP; Grafana, Tempo, Prometheus, Loki (`grafana/otel-lgtm`) in development |
@@ -80,8 +87,13 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Decision | Why |
 |---|---|
 | One database per service, each on a private network | A service owns its data; no other service can reach its database, not even through the network |
-| Synchronous saga in `registration-service`, with compensation | Event check, seat reservation, then the registration is saved; if saving fails, the seat is released. No distributed transaction, and no HTTP call inside a database transaction |
-| Idempotent seat reservation (reservation id = registration id) | A retried reserve or release never counts twice |
+| Saga orchestrated by `registration-service`, over Kafka | Registering writes a `PENDING` registration and its `ReserveSeat` command in one local transaction (`202 Accepted`); `event-service` reserves the seat and answers `SeatReserved` or `SeatRejected` (full, closed, unknown), which confirms or rejects the registration. No distributed transaction, no remote call while registering or cancelling: both work while `event-service` is down, and nothing is lost if a service stops |
+| Cancellation allowed while the seat is requested | The registration is cancelled at once and `ReleaseSeat` follows `ReserveSeat` on the same partition (key = event id): the release always reaches `event-service` after the reservation it undoes, and a late `SeatReserved` is ignored |
+| Idempotent seat reservation (reservation id = registration id) | A seat command delivered again never counts twice |
+| Transactional outbox with a polling publisher (`platform-messaging`) | A message is written in the transaction of its business change and published to Kafka afterwards: a crash in between loses nothing. Polling rather than Debezium: no Kafka Connect to run, ~200 ms of latency is enough here |
+| At-least-once delivery, idempotent consumers | The relay marks a message published only once Kafka has acknowledged it; consumers record each message id in the transaction of its effect, so a redelivery is a no-op |
+| Dead letter topic per topic | A message that keeps failing (two retries) or cannot be read leaves its partition instead of blocking it, with the exception in its headers; it is logged, counted and alerted |
+| A waiting registration is never expired | Its messages are durable and will be answered: expiring it could reject a registration whose seat is being reserved. A gauge counts the registrations waiting for more than a minute, and alerts |
 | Partial unique index on (event, user) for confirmed registrations | Duplicates are rejected by the database itself, even under concurrent requests (covered by a concurrency test) |
 | Retry, then circuit breaker, per downstream service | Fast transient failures are retried once; a failing service is cut off and answered with `503` in milliseconds. Business answers (`404`, `409`) are not failures |
 | "No instance available" ignored by the circuit breaker | No request is sent, so there is nothing to protect; counting it made recovery fail while discovery caught up ([#10](https://github.com/kardiguemagassa/event-management-platform/issues/10)) |
@@ -94,7 +106,7 @@ Eureka (8761) and the observability backend (Grafana 3000, OTLP 4318, Tempo 3200
 | Keys from the internal JWK set, public issuer and audience checked | No discovery call at startup; a token from another realm or for another audience is rejected |
 | Identity taken from the token, never from the request | Closes IDOR: a registration is made for the caller, a profile is the caller's own, an event belongs to its creator |
 | Roles for actions, ownership for objects | `ORGANIZER` may change events, but only their own (403); objects of others that are private do not exist for the caller (404) |
-| Client credentials for service-to-service calls | `registration-service` reserves seats (`SEAT_MANAGER`) and reads attendee names (`PROFILE_READER`) with its own identity, not the user's; the token is cached and renewed |
+| Client credentials for service-to-service calls | `registration-service` reads the organizer of an event and the attendee names (`PROFILE_READER`) with its own identity, not the user's; the token is cached and renewed. Seats go through Kafka, not HTTP |
 | Shared `platform-security` library, imported explicitly | One implementation of token validation, role mapping and 401/403 problems; each service keeps its own access rules |
 | OpenTelemetry through Spring Boot's starter, no Java agent | Vendor-neutral standard (OTLP): the backend can become Datadog, Dynatrace or Elastic without code change; nothing to add to the images |
 | Noise dropped before export | Health probes, Eureka heartbeats and Spring Security filter spans would bury the business traces at 100 % sampling |
@@ -110,9 +122,11 @@ the Keycloak admin console.
 |---|---|---|
 | `ATTENDEE` | every new user (default role) | registering to events, cancelling one's own registrations |
 | `ORGANIZER` | by an administrator | creating events, and changing, publishing, cancelling or deleting one's own |
-| `SEAT_MANAGER` | the `registration-service` service account only | reserving and releasing seats |
 | `PROFILE_READER` | the `registration-service` service account only | reading the display names of users |
 | `ADMIN` | by an administrator | moderation: searching and deleting any user profile, listing every event (drafts included), reading who registered to any event, cancelling any event |
+
+The realm file is imported only into an empty Keycloak: a realm created before 1.1.0 keeps the `SEAT_MANAGER` role,
+no longer used by any route (it can be deleted in the admin console).
 
 | Route | Access |
 |---|---|
@@ -121,7 +135,6 @@ the Keycloak admin console.
 | `GET /api/events?scope=all` | `ADMIN`: every event of every organizer, drafts included |
 | `POST /api/events/{id}/cancel` | `ORGANIZER` of the event, or `ADMIN` (moderation, audited) |
 | other `/api/events/**` | `ORGANIZER`, and organizer of the event for changes (`403 NOT_EVENT_ORGANIZER`); an administrator cancels but never edits, publishes or deletes the event of another |
-| `/api/events/{id}/capacity/**` | `SEAT_MANAGER`; closed at the gateway |
 | `POST /api/registrations`, `POST /api/registrations/{id}/cancel` | `ATTENDEE`, own registrations only (others are `404`) |
 | `GET /api/registrations/me`, `GET /api/registrations/{id}` | authenticated, own registrations only |
 | `GET /api/registrations/events/{eventId}` | `ORGANIZER` of that event, or `ADMIN` (audited); each registration carries the attendee's display name |
@@ -192,7 +205,9 @@ to `grafana/otel-lgtm`:
 - **Logs**: every line carries `[traceId-spanId]` on the console, and is sent to Loki with its trace and span ids
   (OpenTelemetry Logback appender, installed by `platform-observability`: no `logback-spring.xml` per service). In
   Grafana, **Explore**, data source **Loki**: `{service_name="registration-service"} | trace_id="<traceId>"`, or from a
-  trace in Tempo, the logs of a span. `registration-service` logs each confirmed and cancelled registration (ids only).
+  trace in Tempo, the logs of a span. `registration-service` logs each registration requested, confirmed, rejected and
+  cancelled (ids only), `event-service` each seat taken, refused and released: one trace follows a registration from
+  the `POST` to its answer, across Kafka (the `traceparent` of the request is stored with each outbox message).
 - **Errors**: every problem answered by a service carries `traceId`, for example
   `{"code": "DOWNSTREAM_UNAVAILABLE", "traceId": "4bf92f3577b34da6a3ce929d0e0e4736", ...}`.
 - **Sampling**: `TRACING_SAMPLING_PROBABILITY`, 10 % by default (production), 100 % in compose and `.env.example`.
@@ -203,7 +218,10 @@ to `grafana/otel-lgtm`:
   - **Resilience**: state of every circuit breaker over time (closed, half-open, open), failure rate, calls rejected
     while open, gateway fallbacks and timeouts, downstream calls of `registration-service`;
   - **Business**: registrations confirmed, cancelled and rejected by reason (`EVENT_FULL`, `ALREADY_REGISTERED`...),
-    counted by `registration-service` (`registrations_*_total`).
+    counted by `registration-service` (`registrations_*_total`); and the **seat saga**: registrations waiting for their
+    seat for more than a minute (`registrations_pending_stale`), dead letters (`messaging_dead_letters_total`, by
+    topic), consumer lag, outbox backlog and age of its oldest message per service (`messaging_outbox_pending`,
+    `messaging_outbox_oldest_seconds`).
 
   Metrics are pushed every 10 s in compose (`OTEL_METRICS_STEP`), every minute by default.
 
@@ -213,7 +231,8 @@ to `grafana/otel-lgtm`:
 - **Alerts** (`observability/grafana/alerting.yaml`, Grafana **Alerting**): more than 5 % of 5xx on a service for
   2 minutes, calls rejected by an open circuit breaker for 2 minutes (a sustained outage under traffic). A
   half-open breaker alone is not alerted: without traffic it stays half-open after the downstream has recovered,
-  which is not an incident. No contact point in development; production would route them
+  which is not an incident. For the saga: an outbox not published for a minute (Kafka down), registrations waiting
+  for their seat for 2 minutes (event-service down or lagging), and any message sent to a dead letter topic. No contact point in development; production would route them
   to the on-call channel.
 
 ## API
@@ -229,7 +248,7 @@ URI of the client.
 | Resource | Endpoints |
 |---|---|
 | Users (profiles) | `GET` `PUT` `DELETE` `/api/users/me`, `GET /api/users`, `GET` `DELETE` `/api/users/{id}`, `GET /api/users/names` (used by `registration-service`) |
-| Events | `GET` `POST` `/api/events`, `GET` `PUT` `DELETE` `/api/events/{id}`, `POST /api/events/{id}/publish`, `POST /api/events/{id}/cancel`, `POST /api/events/{id}/capacity/reserve` and `.../release` (used by `registration-service`) |
+| Events | `GET` `POST` `/api/events`, `GET` `PUT` `DELETE` `/api/events/{id}`, `POST /api/events/{id}/publish`, `POST /api/events/{id}/cancel` |
 | Registrations | `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/{id}`, `POST /api/registrations/{id}/cancel`, `GET /api/registrations/events/{eventId}` |
 
 `GET /api/events` takes optional filters, combined with AND, on top of pagination (`page`, `size` up to 100) and
@@ -245,8 +264,11 @@ sorting (`sort=startAt|createdAt|title[,asc|desc]`):
 
 A malformed or out-of-range filter is a `400 VALIDATION_FAILED` naming the parameter in `errors`.
 
-`GET /api/registrations/me` takes `eventId` and `status` (`CONFIRMED`, `CANCELLED`): with both, it tells whether the
-caller is registered to an event, which the event page uses.
+`POST /api/registrations` answers `202 Accepted` with a `PENDING` registration and its `Location`: the seat is reserved
+asynchronously, and the registration becomes `CONFIRMED`, or `REJECTED` with a `rejectionReason` (`EVENT_FULL`,
+`EVENT_NOT_REGISTRABLE`, `EVENT_NOT_FOUND`), usually in under a second. The web application follows it until then.
+`GET /api/registrations/me` takes `eventId` and `status` (`PENDING`, `CONFIRMED`, `REJECTED`, `CANCELLED`): newest
+first, the caller's latest registration to an event tells whether they are registered, which the event page uses.
 
 Errors are RFC 9457 problem details with a stable `code` (the HTTP status of each case is listed in the Swagger UI):
 
@@ -254,9 +276,11 @@ Errors are RFC 9457 problem details with a stable `code` (the HTTP status of eac
 |---|---|
 | Security | `UNAUTHENTICATED` (401), `ACCESS_DENIED` (403, missing role), `NOT_EVENT_ORGANIZER` (403, not the owner) |
 | Not found | `USER_NOT_FOUND`, `EVENT_NOT_FOUND`, `REGISTRATION_NOT_FOUND` |
-| Business rules | `ALREADY_REGISTERED`, `EVENT_FULL`, `EVENT_NOT_REGISTRABLE`, `REGISTRATION_ALREADY_CANCELLED`, `EMAIL_ALREADY_USED`, `INVALID_EVENT_STATE`, `EVENT_HAS_RESERVATIONS`, `CAPACITY_BELOW_RESERVED`, `RESERVATION_ID_CONFLICT`, `CONCURRENT_MODIFICATION` |
+| Business rules | `ALREADY_REGISTERED`, `REGISTRATION_ALREADY_CANCELLED`, `EMAIL_ALREADY_USED`, `INVALID_EVENT_STATE`, `EVENT_HAS_RESERVATIONS`, `CAPACITY_BELOW_RESERVED`, `CONCURRENT_MODIFICATION` |
 | Invalid request | `VALIDATION_FAILED`, `INVALID_SORT_PROPERTY`, `EVENT_START_NOT_IN_FUTURE`, `EMAIL_CLAIM_MISSING` |
 | Availability | `DOWNSTREAM_UNAVAILABLE` (a dependency of `registration-service`), `SERVICE_UNAVAILABLE` and `UPSTREAM_TIMEOUT` (gateway fallback), `INTERNAL_ERROR` |
+
+A full event or an event closed to registration is not an error: the registration is accepted (`202`), then `REJECTED` with `rejectionReason` `EVENT_FULL` or `EVENT_NOT_REGISTRABLE`.
 
 ## Running locally
 
@@ -291,7 +315,7 @@ Published ports are bound to `127.0.0.1` only. The services publish no port: the
 ### Option 2: databases in Docker, services from the IDE
 
 ```bash
-docker compose up -d                     # databases (5433, 5434, 5435), Keycloak (8180), otel-lgtm (3000, 4318)
+docker compose up -d                     # databases (5433, 5434, 5435), Keycloak (8180), Kafka (9094), otel-lgtm (3000, 4318)
 ```
 
 Then start `discovery-server` first, followed by the other services. The aggregated Swagger UI works here too
@@ -346,7 +370,7 @@ uploaded with the HTML report.
 ./scripts/e2e-docker.sh
 ```
 
-Runs against Option 1, through the gateway only, with real Keycloak tokens (59 checks):
+Runs against Option 1, through the gateway only, with real Keycloak tokens (67 checks):
 
 - API documentation: each OpenAPI document declares the Keycloak OAuth2 scheme (Swagger UI login);
 - web application: served on any client-side route with its Content Security Policy, `/bff` and `/api` relayed to the
@@ -354,29 +378,32 @@ Runs against Option 1, through the gateway only, with real Keycloak tokens (59 c
 - browser session (BFF): login page served with the platform theme, login scripted on it through the gateway, `/bff/me` with the realm roles, an API
   call with the session cookie only (token relayed), a write refused without the CSRF token, logout;
 - profiles: created with `PUT /api/users/me`, e-mail taken from the token, `ADMIN` required to list users, erasure;
-- security: anonymous call, malformed token and token of another realm (`401`), internal capacity route (`403`),
+- security: anonymous call, malformed token and token of another realm (`401`), internal names route (`403`),
   private draft (`404`), another organizer changing an event (`403`) or listing its registrations (`403`), another
   attendee cancelling a registration (`404`);
-- business rules: registration, duplicate (`409 ALREADY_REGISTERED`), full event, cancellation, an attendee finding
-  their registration to an event; the event is cancelled at the end so that runs do not pile up in the catalogue;
+- business rules: registration accepted then confirmed through Kafka, an unknown event and a full event rejected with
+  their reason, duplicate (`409 ALREADY_REGISTERED`, also while the seat is requested), cancellation then the freed
+  seat taken, an attendee finding their registration to an event; the event is cancelled at the end so that runs do
+  not pile up in the catalogue;
 - administration: every event listed (`scope=all`, refused to an organizer), registrations of any event with the names,
   a profile found by e-mail then erased, the event of an organizer cancelled (moderation);
-- resilience: `event-service` outage (fast `503` once the instance has left discovery, gateway fallback), recovery after restart,
-  and no seat leaked;
+- resilience: `event-service` outage (a registration is still accepted and waits, gateway fallback), recovery after
+  restart (the waiting registration is confirmed), and no seat leaked;
 - tracing: a request started in a known trace reaches Tempo with the spans of the gateway, `registration-service` and
   `event-service` and its SQL query, an error response carries the id of its trace, and the log of a request
   reaches Loki with its trace id;
 - dashboards: the three are provisioned in Grafana and the HTTP metrics of the 4 services, with the names and labels the
   dashboards read, are found in Prometheus.
-- business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, and both
-  alert rules are loaded in Grafana.
+- business metrics and alerts: confirmed registrations and `EVENT_FULL` rejections are counted in Prometheus, the
+  outbox of both services and the waiting registrations are measured, and the alert rules are loaded in Grafana.
 
 ### Docker setup at a glance
 
 - One multi-stage `Dockerfile` for every module (`--build-arg MODULE=...`): layered jar, Maven cache mount, non-root user.
 - `docker` Spring profile: unique Eureka instance id, service name announced instead of an IP, short discovery
   intervals (development values; production keeps the defaults).
-- One private network per service and its database: a database is reachable by its owner only.
+- One private network per service and its database: a database is reachable by its owner only. Kafka has its own
+  network too, joined by the services of the saga only.
 - Health checks on `/actuator/health/readiness`, used to order the startup.
 - JVM sized for the container: G1 chosen explicitly (the JVM would pick the single-threaded Serial collector below
   2 CPUs or 1792 MB, measured at 6 s pauses), heap at 60 % of the 512 MB limit.
@@ -430,7 +457,7 @@ After a change of the API, with the platform running:
 | Level | Tools | Scope |
 |---|---|---|
 | Unit | JUnit 5, AssertJ, Mockito, Spring Security Test | Domain rules (ownership, visibility), application services, HTTP adapters and access rules, the circuit breaker configuration on a real Resilience4j breaker |
-| Integration (`*IT`) | Testcontainers (PostgreSQL 18), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs |
+| Integration (`*IT`) | Testcontainers (PostgreSQL 18, Kafka), JDK HTTP server as fake downstream services and fake Keycloak | Repositories and Flyway migrations, concurrent registrations and profile saves, retry and circuit breaker, gateway routing and fallback, token validation with real signed tokens (expired, other issuer or audience, unknown key), client credentials, API docs; the outbox (order, trace context, rollback, Kafka outage) and dead letter topics |
 | Web application | Vitest, Angular TestBed, `HttpTestingController` | Session (BFF), error mapping, guards, pages and components against a fake HTTP backend; coverage floor 85 % lines, 80 % branches (`npm test` in `frontend`) |
 | End to end | `scripts/e2e-docker.sh` | The whole platform in Docker with a real Keycloak, through the gateway only, including an outage and the recovery of `event-service` |
 | Browser | Playwright, axe-core | The user journeys in Chromium on the platform in Docker, signing in on the real Keycloak pages; WCAG 2.1 A/AA checks on the main pages; a phone layout (`e2e`, see below) |
@@ -443,6 +470,7 @@ coverage can only go up:
 |---|---|---|
 | `platform-security` | 90 % | 80 % |
 | `platform-observability` | 90 % | 80 % |
+| `platform-messaging` | 90 % | 80 % |
 | `api-gateway` | 96 % | 63 % |
 | `user-service` | 98 % | 84 % |
 | `event-service` | 98 % | 84 % |
@@ -480,8 +508,6 @@ pull request would change `main` directly and require merging `main` back into `
 
 ## Known limitations
 
-- **Saga without an outbox**: if `registration-service` stops between the seat reservation and the save of the
-  registration, the seat stays reserved. A transactional outbox with a message broker would make the saga reliable.
 - **Keycloak in development mode**: `start-dev`, plain HTTP and an embedded admin account; production needs `start`
   behind TLS, a fixed hostname and an external database for high availability.
 - **No "forgot password" and no "remember me"**: resetting a password sends an e-mail, and the platform has no mail
@@ -511,6 +537,6 @@ pull request would change `main` directly and require merging `main` back into `
 | Version | Content |
 |---|---|
 | **1.0.0** | Backend for Frontend in the gateway (done); API additions for the screens (organizer's events, batch read of events, attendee names, catalog search) (done); Angular application: catalogue, event page with registration, my registrations, profile and onboarding (done), organizer's events with publish, cancel and delete, event form, attendee list (done); administration: API, events and users screens (done) (Angular Material, French UI, client generated from the OpenAPI documents) served by nginx on the same origin as the gateway; Keycloak login theme matching it (done); browser end-to-end tests (Playwright, axe-core) (done) |
-| **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) |
+| **1.1.0** | Reliable registration saga: transactional outbox and Kafka (KRaft) (done); saga metrics, dashboard and alerts (done); HTTP seat route removed (done) |
 | **1.2.0** | Issue #37, trace id in the gateway's own errors, alert routing to an on-call channel |
 | **2.0.0** | Kubernetes (Helm charts, local cluster in CI), Keycloak in production mode (TLS, fixed hostname, external database), sessions in Redis |

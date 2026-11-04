@@ -138,6 +138,45 @@ services:
       retries: 30
       start_period: 30s
 
+  # Message broker of the registration saga (KRaft: no ZooKeeper), one node in development. Topics are created by the
+  # services that own them; automatic creation is off, so a misspelt topic fails instead of appearing silently.
+  kafka:
+    image: apache/kafka:4.3.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Containers use kafka:9092; services started from the IDE use localhost:${KAFKA_PORT:-9094}.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_PORT:-9094}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # One broker: internal topics cannot be replicated.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+    ports:
+      - "127.0.0.1:${KAFKA_PORT:-9094}:9094"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [messaging-net]
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    healthcheck:
+      # The check is a JVM of its own: a small heap, so that it fits in the limit next to the broker.
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS=-Xmx64m /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
   # Observability backend for development, in one container: OpenTelemetry collector (OTLP), Tempo (traces),
   # Prometheus (metrics), Loki (logs) and Grafana. Not a production setup: no persistence, default admin account.
   otel-lgtm:
@@ -202,13 +241,14 @@ services:
   event-service:
     <<: *spring-service
     image: ${IMAGE_NAMESPACE:-local}/event-platform-event-service:${IMAGE_TAG:-dev}
-    networks: [default, event-net]
+    networks: [default, event-net, messaging-net]
     build:
       context: .
       args:
         MODULE: event-service
     environment:
       <<: *spring-environment
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       EVENT_DB_HOST: event-db
       EVENT_DB_PORT: 5432
       EVENT_DB_NAME: ${EVENT_DB_NAME:-event_db}
@@ -216,6 +256,8 @@ services:
       EVENT_DB_PASSWORD: ${EVENT_DB_PASSWORD:?EVENT_DB_PASSWORD is required}
     depends_on:
       event-db:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
       discovery-server:
         condition: service_healthy
@@ -226,7 +268,7 @@ services:
   registration-service:
     <<: *spring-service
     image: ${IMAGE_NAMESPACE:-local}/event-platform-registration-service:${IMAGE_TAG:-dev}
-    networks: [default, registration-net]
+    networks: [default, registration-net, messaging-net]
     build:
       context: .
       args:
@@ -243,8 +285,11 @@ services:
       # Client credentials of its service account, token requested from Keycloak on the compose network.
       REGISTRATION_SERVICE_CLIENT_SECRET: ${REGISTRATION_SERVICE_CLIENT_SECRET:?REGISTRATION_SERVICE_CLIENT_SECRET is required}
       KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/event-platform/protocol/openid-connect/token
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       registration-db:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
       discovery-server:
         condition: service_healthy
@@ -301,6 +346,7 @@ volumes:
   event-db-data:
   registration-db-data:
   keycloak-db-data:
+  kafka-data:
 
 networks:
   # One private network per service and its database: a database is reachable by its owner only.
@@ -309,3 +355,5 @@ networks:
   event-net:
   registration-net:
   keycloak-net:
+  # The broker, reached by the services of the saga only (event-service, registration-service).
+  messaging-net:
