@@ -19,8 +19,8 @@ import org.springframework.context.annotation.Configuration;
 public class ObservabilityAutoConfiguration {
 
     @Bean
-    ObservationPredicate platformNoiseFilter() {
-        return new NoiseFilter();
+    ObservationPredicate platformNoiseFilter(ObjectProvider<Tracer> tracer) {
+        return new NoiseFilter(tracer);
     }
 
     @Bean
