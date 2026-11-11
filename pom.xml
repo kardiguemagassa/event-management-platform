@@ -32,7 +32,7 @@
     <properties>
         <!-- Single source of truth for the version: overridden by the release build (-Drevision=X.Y.Z, from the Git tag). -->
         <revision>0.0.0-SNAPSHOT</revision>
-        <flatten-maven-plugin.version>1.8.0</flatten-maven-plugin.version>
+        <flatten-maven-plugin.version>1.9.0</flatten-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.16</jacoco-maven-plugin.version>
         <!-- Coverage floors (ratchet): each module sets its own just below its measured value, never lowers them. -->
         <jacoco.line.minimum>0.80</jacoco.line.minimum>
