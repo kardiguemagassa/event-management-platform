@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.2</version>
+        <version>4.2.0</version>
         <relativePath/>
     </parent>
 
@@ -32,16 +32,16 @@
     <properties>
         <!-- Single source of truth for the version: overridden by the release build (-Drevision=X.Y.Z, from the Git tag). -->
         <revision>0.0.0-SNAPSHOT</revision>
-        <flatten-maven-plugin.version>1.8.0</flatten-maven-plugin.version>
+        <flatten-maven-plugin.version>1.9.0</flatten-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.16</jacoco-maven-plugin.version>
         <!-- Coverage floors (ratchet): each module sets its own just below its measured value, never lowers them. -->
         <jacoco.line.minimum>0.80</jacoco.line.minimum>
         <jacoco.branch.minimum>0.60</jacoco.branch.minimum>
         <java.version>21</java.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
-        <springdoc.version>3.2.0</springdoc.version>
+        <springdoc.version>3.2.1</springdoc.version>
         <!-- SQL spans (JDBC observations); not managed by Spring Boot -->
-        <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
+        <datasource-micrometer.version>2.3.1</datasource-micrometer.version>
         <!-- Logback appender for OTLP logs; not managed by Spring Boot. Must match the OpenTelemetry SDK that Spring Boot
              manages (opentelemetry.version 1.62.0 pairs with instrumentation 2.28.0): update both together. -->
         <opentelemetry-instrumentation.version>2.28.0-alpha</opentelemetry-instrumentation.version>
